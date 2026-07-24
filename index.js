@@ -138,6 +138,8 @@ app.listen(port, async function () {
   console.log("=================================");
 
   try {
+    await sequelize.query("ALTER TABLE `organizacoes` ADD COLUMN `template_contrato` TEXT NULL").catch(function() {});
+    await sequelize.query("ALTER TABLE `organizacoes` ADD COLUMN `logo_url` VARCHAR(500) NULL").catch(function() {});
     await seed();
   } catch (e) {
     console.log(" Erro ao executar seed:", e.message);
