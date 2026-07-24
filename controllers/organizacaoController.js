@@ -84,7 +84,7 @@ var update = async function (req, res) {
       return res.status(404).json({ error: "Organização não encontrada" });
     }
 
-    var camposPermitidos = ["nome", "nome_curto", "nif", "email", "telefone", "endereco", "cidade", "provincia", "pais", "logo", "website", "dominio", "activo"];
+    var camposPermitidos = ["nome", "nome_curto", "nif", "email", "telefone", "endereco", "cidade", "provincia", "pais", "logo", "website", "dominio", "activo", "template_contrato", "logo_url"];
     var dadosActualizar = {};
 
     for (var i = 0; i < camposPermitidos.length; i++) {

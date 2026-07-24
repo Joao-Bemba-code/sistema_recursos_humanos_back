@@ -1,5 +1,7 @@
 var PDFDocument = require("pdfkit");
-var { Vencimento, Pagamento, Colaborador, Contrato } = require("../models");
+var path = require("path");
+var fs = require("fs");
+var { Vencimento, Pagamento, Colaborador, Contrato, Organizacao } = require("../models");
 
 var MESES = ["Janeiro","Fevereiro","Marco","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
@@ -14,25 +16,62 @@ function fmtDate(d) {
   return dt.getDate() + " de " + MESES[dt.getMonth()] + " de " + dt.getFullYear();
 }
 
-function drawHeader(doc, titulo, subtitulo) {
+async function getOrganizacao(colab) {
+  if (colab && colab.organizacao_id) {
+    return await Organizacao.findByPk(colab.organizacao_id);
+  }
+  return null;
+}
+
+function drawHeader(doc, titulo, subtitulo, org) {
+  var orgNome = org ? org.nome : "SGHR";
+  var orgSub = org ? (org.nome_curto || org.nome) : "Sistema de Gestao de Recursos Humanos";
   doc.rect(0, 0, doc.page.width, 90).fill("#002b92");
-  doc.fillColor("#ffffff").fontSize(22).font("Helvetica-Bold").text("CENFFOR", 40, 22, { continued: true });
-  doc.fontSize(10).font("Helvetica").text("  Centro de Formacao Profissional", 0, 26, { align: "left" });
+  doc.fillColor("#ffffff").fontSize(22).font("Helvetica-Bold").text(orgNome, 40, 22, { continued: true });
+  doc.fontSize(10).font("Helvetica").text("  " + orgSub, 0, 26, { align: "left" });
   doc.fontSize(16).font("Helvetica-Bold").text(titulo, 40, 52);
   doc.fontSize(9).font("Helvetica").text(subtitulo, 40, 70);
   doc.fillColor("#000000");
 }
 
-function drawFooter(doc) {
+function drawFooter(doc, org) {
+  var orgNome = org ? org.nome : "SGHR";
   var y = doc.page.height - 40;
   doc.fontSize(8).fillColor("#999999")
-    .text("CENFFOR - Centro de Formacao Profissional | Documento gerado pelo sistema SGHR", 40, y, { align: "center", width: doc.page.width - 80 });
+    .text(orgNome + " | Documento gerado pelo sistema SGHR", 40, y, { align: "center", width: doc.page.width - 80 });
   doc.fillColor("#000000");
+}
+
+function drawLogo(doc, org, x, y, maxW, maxH) {
+  if (!org || !org.logo_url) return false;
+  try {
+    var logoPath = org.logo_url;
+    if (logoPath.startsWith("/uploads/")) {
+      logoPath = path.join(__dirname, "..", logoPath);
+    }
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, x, y, { fit: [maxW, maxH] });
+      return true;
+    }
+  } catch (e) {
+    // logo error silently ignored
+  }
+  return false;
 }
 
 function addLine(doc, y) {
   doc.moveTo(40, y).lineTo(doc.page.width - 40, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
   doc.strokeColor("#000000");
+}
+
+function replacePlaceholders(template, vars) {
+  var result = template;
+  var keys = Object.keys(vars);
+  for (var i = 0; i < keys.length; i++) {
+    var regex = new RegExp("\\{" + keys[i] + "\\}", "g");
+    result = result.replace(regex, vars[keys[i]] || "");
+  }
+  return result;
 }
 
 // ==================== FOLHA SALARIAL PDF ====================
@@ -53,13 +92,14 @@ exports.folhaSalarial = async function (req, res) {
     });
 
     var colab = pagamento.colaborador;
+    var org = await getOrganizacao(colab);
 
     var doc = new PDFDocument({ size: "A4", margin: 40 });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", "attachment; filename=recibo_vencimento_" + (colab ? colab.numero_colaborador : "") + ".pdf");
     doc.pipe(res);
 
-    drawHeader(doc, "Recibo de Vencimento", "Mes de " + MESES[pagamento.mes - 1] + " de " + pagamento.ano);
+    drawHeader(doc, "Recibo de Vencimento", "Mes de " + MESES[pagamento.mes - 1] + " de " + pagamento.ano, org);
 
     var y = 110;
 
@@ -82,7 +122,6 @@ exports.folhaSalarial = async function (req, res) {
 
     var col1 = 50;
     var col2 = 200;
-    var col3 = 380;
     var rowH = 16;
 
     doc.fontSize(9).font("Helvetica-Bold").fillColor("#002b92");
@@ -92,7 +131,6 @@ exports.folhaSalarial = async function (req, res) {
     addLine(doc, y); y += 4;
     doc.fillColor("#000000").font("Helvetica");
 
-    // Vencimentos
     doc.font("Helvetica-Bold").fillColor("#15803d").text("VENCIMENTOS", col1, y); y += rowH;
     doc.font("Helvetica").fillColor("#000000");
 
@@ -122,7 +160,6 @@ exports.folhaSalarial = async function (req, res) {
     y += rowH + 4;
     addLine(doc, y); y += 8;
 
-    // Descontos
     doc.font("Helvetica-Bold").fillColor("#ba1a1a").text("DESCONTOS", col1, y); y += rowH;
     doc.font("Helvetica").fillColor("#000000");
 
@@ -150,7 +187,6 @@ exports.folhaSalarial = async function (req, res) {
     y += rowH + 4;
     addLine(doc, y); y += 10;
 
-    // Total Liquido
     doc.fontSize(12).font("Helvetica-Bold").fillColor("#002b92");
     doc.text("TOTAL LIQUIDO A RECEBER", col1, y);
     doc.text(fmt(pagamento.total_liquido) + " Kz", col2, y);
@@ -165,7 +201,7 @@ exports.folhaSalarial = async function (req, res) {
     }
     doc.text("Periodo: " + MESES[pagamento.mes - 1] + " / " + pagamento.ano, 40, y); y += 20;
 
-    drawFooter(doc);
+    drawFooter(doc, org);
     doc.end();
   } catch (e) {
     console.log("Erro ao gerar PDF folha salarial:", e.message);
@@ -186,17 +222,31 @@ exports.contrato = async function (req, res) {
     }
 
     var colab = contrato.colaborador;
+    var org = await getOrganizacao(colab);
+
     var doc = new PDFDocument({ size: "A4", margin: 50 });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", "attachment; filename=contrato_trabalho_" + (colab ? colab.numero_colaborador : "") + ".pdf");
     doc.pipe(res);
 
-    // Header
-    doc.rect(0, 0, doc.page.width, 100).fill("#002b92");
-    doc.fillColor("#ffffff").fontSize(24).font("Helvetica-Bold").text("CENFFOR", 50, 20, { continued: true });
-    doc.fontSize(10).font("Helvetica").text("  Centro de Formacao Profissional", 0, 24);
-    doc.fontSize(12).font("Helvetica-Bold").text("CONTRATO DE TRABALHO", 50, 55);
-    doc.fontSize(9).font("Helvetica").text("Ref: " + contrato.numero + " | " + contrato.tipo.replace("_", " "), 50, 73);
+    // Header with logo
+    var headerH = 100;
+    doc.rect(0, 0, doc.page.width, headerH).fill("#002b92");
+
+    var logoX = 50;
+    var textX = 50;
+    var hasLogo = drawLogo(doc, org, 50, 15, 70, 70);
+    if (hasLogo) {
+      textX = 135;
+    }
+
+    doc.fillColor("#ffffff").fontSize(22).font("Helvetica-Bold");
+    doc.text(org ? org.nome : "SGHR", textX, 18, { width: doc.page.width - textX - 50 });
+    if (org && org.nome_curto) {
+      doc.fontSize(10).font("Helvetica").text(org.nome_curto, textX, 38, { width: doc.page.width - textX - 50 });
+    }
+    doc.fontSize(12).font("Helvetica-Bold").text("CONTRATO DE TRABALHO", textX, 58);
+    doc.fontSize(9).font("Helvetica").text("Ref: " + contrato.numero + " | " + contrato.tipo.replace("_", " "), textX, 76);
     doc.fillColor("#000000");
 
     var y = 120;
@@ -204,144 +254,211 @@ exports.contrato = async function (req, res) {
     var w = doc.page.width - 100;
     var pw = doc.page.width;
 
-    // Cabecalho do contrato
-    doc.fontSize(9).font("Helvetica").fillColor("#333333");
-    doc.text("Data de Inicio: " + fmtDate(contrato.data_inicio), ml, y);
-    y += 14;
-    if (contrato.data_fim) {
-      doc.text("Data de Fim: " + fmtDate(contrato.data_fim), ml, y);
-      y += 14;
-    }
-    if (contrato.data_assinatura) {
-      doc.text("Data de Assinatura: " + fmtDate(contrato.data_assinatura), ml, y);
-      y += 14;
-    }
-    y += 6;
-    addLine(doc, y); y += 12;
+    // Se a organizacao tem template, usar template com placeholders
+    if (org && org.template_contrato) {
+      var placeholders = {
+        "NOME_COLABORADOR": colab ? colab.nome_completo : "",
+        "NUMERO_COLABORADOR": colab ? colab.numero_colaborador : "",
+        "NIF_COLABORADOR": colab ? (colab.nif || "") : "",
+        "BI_COLABORADOR": colab ? (colab.bi || "") : "",
+        "ESTADO_CIVIL": colab ? (colab.estado_civil || "") : "",
+        "NATURAL_DE": colab ? ((colab.cidade || "") + (colab.provincia ? ", " + colab.provincia : "")) : "",
+        "RESIDENCIA": colab ? (colab.endereco || "") : "",
+        "EMAIL_COLABORADOR": colab ? (colab.email_institucional || colab.email_pessoal || "") : "",
+        "TELEFONE_COLABORADOR": colab ? (colab.telefone || "") : "",
+        "NUMERO_CONTRATO": contrato.numero || "",
+        "TIPO_CONTRATO": contrato.tipo ? contrato.tipo.replace("_", " ") : "",
+        "DATA_INICIO": fmtDate(contrato.data_inicio),
+        "DATA_FIM": contrato.data_fim ? fmtDate(contrato.data_fim) : "",
+        "DATA_ASSINATURA": contrato.data_assinatura ? fmtDate(contrato.data_assinatura) : fmtDate(contrato.data_inicio),
+        "CATEGORIA_PROFISSIONAL": contrato.funcao || "",
+        "LOCAL_TRABALHO": contrato.local_trabalho || "",
+        "HORARIO_TRABALHO": contrato.horario_trabalho || "",
+        "SALARIO_BASE": contrato.salario_base ? fmt(contrato.salario_base) + " " + contrato.moeda : "",
+        "PERIODO_EXPERIMENTACAO": contrato.periodo_experimentacao ? contrato.periodo_experimentacao + " dias" : "",
+        "NOME_ORGANIZACAO": org ? org.nome : "",
+        "NIF_ORGANIZACAO": org ? (org.nif || "") : "",
+        "MORADA_ORGANIZACAO": org ? (org.endereco || "") : "",
+        "CIDADE_ORGANIZACAO": org ? (org.cidade || "") : "",
+        "PROVINCIA_ORGANIZACAO": org ? (org.provincia || "") : "",
+        "PAIS_ORGANIZACAO": org ? (org.pais || "Angola") : "",
+      };
 
-    // Funcao e Local
-    doc.fillColor("#000000").font("Helvetica-Bold").fontSize(10);
-    if (contrato.funcao) {
-      doc.text("Categoria Profissional: " + contrato.funcao, ml, y);
-      y += 16;
-    }
-    if (contrato.local_trabalho) {
-      doc.text("Local de Trabalho: " + contrato.local_trabalho, ml, y);
-      y += 16;
-    }
-    if (contrato.horario_trabalho) {
-      doc.text("Horario de Trabalho: " + contrato.horario_trabalho, ml, y);
-      y += 16;
-    }
-    doc.text("Salario Base: " + fmt(contrato.salario_base) + " " + contrato.moeda, ml, y);
-    y += 16;
-    if (contrato.periodo_experimentacao) {
-      doc.text("Periodo de Experimentacao: " + contrato.periodo_experimentacao + " dias", ml, y);
-      y += 16;
-    }
+      var templateTexto = replacePlaceholders(org.template_contrato, placeholders);
 
-    y += 6;
-    addLine(doc, y); y += 14;
-
-    // Dados da Entidade
-    doc.font("Helvetica-Bold").fontSize(11).fillColor("#002b92");
-    doc.text("ENTIDADE EMPREGADORA", ml, y);
-    y += 18;
-    doc.font("Helvetica").fontSize(9).fillColor("#333333");
-    doc.text("Denominacao: CENFFOR - Centro de Formacao Profissional, Lda", ml, y); y += 14;
-    doc.text("NIF: 5001327691", ml, y); y += 14;
-    doc.text("Sede: Cacuaco, Luanda, Angola", ml, y); y += 20;
-
-    // Dados do Trabalhador
-    doc.font("Helvetica-Bold").fontSize(11).fillColor("#002b92");
-    doc.text("TRABALHADOR", ml, y);
-    y += 18;
-    doc.font("Helvetica").fontSize(9).fillColor("#333333");
-
-    if (colab) {
-      doc.text("Nome Completo: " + colab.nome_completo, ml, y); y += 14;
-      doc.text("N. Colaborador: " + colab.numero_colaborador, ml, y); y += 14;
-      if (colab.nif) { doc.text("NIF: " + colab.nif, ml, y); y += 14; }
-      if (colab.bi) { doc.text("Bilhete de Identidade: " + colab.bi, ml, y); y += 14; }
-      if (colab.estado_civil) { doc.text("Estado Civil: " + colab.estado_civil, ml, y); y += 14; }
-      if (colab.endereco) { doc.text("Residencia: " + colab.endereco, ml, y); y += 14; }
-      if (colab.email_institucional) { doc.text("Email: " + colab.email_institucional, ml, y); y += 14; }
-    } else {
-      doc.text("Nome: (nao disponivel)", ml, y); y += 14;
-    }
-
-    y += 10;
-    addLine(doc, y); y += 14;
-
-    // Clausulas
-    function drawClausula(titulo, texto) {
-      if (y > 680) {
-        doc.addPage();
-        y = 50;
-      }
-      doc.font("Helvetica-Bold").fontSize(10).fillColor("#002b92");
-      doc.text(titulo, ml, y);
-      y += 16;
+      // Draw template text line by line
+      var linhas = templateTexto.split("\n");
       doc.font("Helvetica").fontSize(9).fillColor("#333333");
-      doc.text(texto, ml, y, { width: w, align: "justify", lineGap: 2 });
-      y = doc.y + 14;
+
+      for (var t = 0; t < linhas.length; t++) {
+        if (y > 720) {
+          doc.addPage();
+          y = 50;
+        }
+        var linha = linhas[t];
+        if (linha.trim() === "") {
+          y += 8;
+          continue;
+        }
+
+        // Check if line is a section title (starts with CLAUSULA or similar uppercase)
+        var isTitle = linha.match(/^(CLAUSULA|CLÁUSULA|ARTIGO|SECCAO|SECÇÃO|TITULO|CAPITULO|CAPÍTULO)/i);
+        if (isTitle) {
+          y += 4;
+          doc.font("Helvetica-Bold").fontSize(10).fillColor("#002b92");
+          doc.text(linha.trim(), ml, y, { width: w });
+          y = doc.y + 6;
+          doc.font("Helvetica").fontSize(9).fillColor("#333333");
+        } else {
+          doc.text(linha, ml, y, { width: w, align: "justify", lineGap: 2 });
+          y = doc.y + 3;
+        }
+      }
+
+      // Assinaturas no final do template
+      y += 20;
+      if (y > 620) {
+        doc.addPage();
+        y = 100;
+      }
+
+      addLine(doc, y); y += 20;
+      doc.font("Helvetica").fontSize(9).fillColor("#333333");
+      doc.text("Feito em duplicado, ambos com valor de original.", ml, y, { align: "center", width: w });
+      y += 20;
+      doc.text(fmtDate(contrato.data_assinatura || contrato.data_inicio), ml, y, { align: "center", width: w });
+      y += 40;
+
+      doc.moveTo(ml + 30, y).lineTo(ml + 220, y).strokeColor("#999999").lineWidth(0.5).stroke();
+      doc.moveTo(pw - ml - 220, y).lineTo(pw - ml - 30, y).stroke();
+      y += 8;
+      doc.strokeColor("#000000");
+      doc.font("Helvetica").fontSize(8).fillColor("#666666");
+      doc.text(org ? org.nome : "Entidade Empregadora", ml + 30, y, { width: 190, align: "center" });
+      doc.text("Trabalhador", pw - ml - 220, y, { width: 190, align: "center" });
+
+    } else {
+      // Sem template — usar modelo padrao com dados da organizacao
+      doc.fontSize(9).font("Helvetica").fillColor("#333333");
+      doc.text("Data de Inicio: " + fmtDate(contrato.data_inicio), ml, y);
+      y += 14;
+      if (contrato.data_fim) {
+        doc.text("Data de Fim: " + fmtDate(contrato.data_fim), ml, y);
+        y += 14;
+      }
+      if (contrato.data_assinatura) {
+        doc.text("Data de Assinatura: " + fmtDate(contrato.data_assinatura), ml, y);
+        y += 14;
+      }
+      y += 6;
+      addLine(doc, y); y += 12;
+
+      doc.fillColor("#000000").font("Helvetica-Bold").fontSize(10);
+      if (contrato.funcao) {
+        doc.text("Categoria Profissional: " + contrato.funcao, ml, y);
+        y += 16;
+      }
+      if (contrato.local_trabalho) {
+        doc.text("Local de Trabalho: " + contrato.local_trabalho, ml, y);
+        y += 16;
+      }
+      if (contrato.horario_trabalho) {
+        doc.text("Horario de Trabalho: " + contrato.horario_trabalho, ml, y);
+        y += 16;
+      }
+      doc.text("Salario Base: " + fmt(contrato.salario_base) + " " + contrato.moeda, ml, y);
+      y += 16;
+      if (contrato.periodo_experimentacao) {
+        doc.text("Periodo de Experimentacao: " + contrato.periodo_experimentacao + " dias", ml, y);
+        y += 16;
+      }
+
+      y += 6;
+      addLine(doc, y); y += 14;
+
+      // Dados da Entidade
+      doc.font("Helvetica-Bold").fontSize(11).fillColor("#002b92");
+      doc.text("ENTIDADE EMPREGADORA", ml, y);
+      y += 18;
+      doc.font("Helvetica").fontSize(9).fillColor("#333333");
+      doc.text("Denominacao: " + (org ? org.nome : "—"), ml, y); y += 14;
+      doc.text("NIF: " + (org ? (org.nif || "—") : "—"), ml, y); y += 14;
+      doc.text("Sede: " + (org ? ((org.endereco || "") + ", " + (org.cidade || "") + ", " + (org.pais || "Angola")) : "—"), ml, y); y += 20;
+
+      // Dados do Trabalhador
+      doc.font("Helvetica-Bold").fontSize(11).fillColor("#002b92");
+      doc.text("TRABALHADOR", ml, y);
+      y += 18;
+      doc.font("Helvetica").fontSize(9).fillColor("#333333");
+
+      if (colab) {
+        doc.text("Nome Completo: " + colab.nome_completo, ml, y); y += 14;
+        doc.text("N. Colaborador: " + colab.numero_colaborador, ml, y); y += 14;
+        if (colab.nif) { doc.text("NIF: " + colab.nif, ml, y); y += 14; }
+        if (colab.bi) { doc.text("Bilhete de Identidade: " + colab.bi, ml, y); y += 14; }
+        if (colab.estado_civil) { doc.text("Estado Civil: " + colab.estado_civil, ml, y); y += 14; }
+        if (colab.endereco) { doc.text("Residencia: " + colab.endereco, ml, y); y += 14; }
+      }
+
+      y += 10;
+      addLine(doc, y); y += 14;
+
+      // Clausulas padrao
+      function drawClausula(titulo, texto) {
+        if (y > 680) { doc.addPage(); y = 50; }
+        doc.font("Helvetica-Bold").fontSize(10).fillColor("#002b92");
+        doc.text(titulo, ml, y);
+        y += 16;
+        doc.font("Helvetica").fontSize(9).fillColor("#333333");
+        doc.text(texto, ml, y, { width: w, align: "justify", lineGap: 2 });
+        y = doc.y + 14;
+      }
+
+      drawClausula("CLÁUSULA PRIMEIRA - Categoria Profissional",
+        "A Entidade Empregadora admite ao seu servico o trabalhador com a categoria profissional de " + (contrato.funcao || "a definir") + ", ficando este sob autoridade e direccao da Entidade Empregadora.");
+
+      drawClausula("CLÁUSULA SEGUNDA - Duracao",
+        "O presente contrato tem inicio em " + fmtDate(contrato.data_inicio) +
+        (contrato.data_fim ? " e termina em " + fmtDate(contrato.data_fim) + "." : " e vigora por tempo indeterminado.") +
+        (contrato.periodo_experimentacao ? " O periodo de experimentacao e de " + contrato.periodo_experimentacao + " dias." : ""));
+
+      drawClausula("CLÁUSULA TERCEIRA - Local de Trabalho",
+        "O local de prestacao de trabalho sera no estabelecimento da Entidade Empregadora, " + (contrato.local_trabalho || "sede da empresa") + ", ou noutro que venha a possuir, arrendar ou explorar.");
+
+      drawClausula("CLÁUSULA QUARTA - Horario de Trabalho",
+        "O trabalhador obriga-se a prestar " + (contrato.horario_trabalho || "40 horas semanais") + " de trabalho, com intervalo para refeicao.");
+
+      drawClausula("CLÁUSULA QUINTA - Retribuicao",
+        "A Entidade Empregadora compromete-se a pagar ao trabalhador a retribuicao mensal de " + fmt(contrato.salario_base) + " " + contrato.moeda + ", sujeita aos descontos legais e paga 12 meses por ano, acrescida de duodecimos de subsidio de natal e de ferias calculados nos termos da lei.");
+
+      drawClausula("CLÁUSULA SEXTA - Deveres do Trabalhador",
+        "O trabalhador obriga-se a: a) Comparecer ao servico com assiduidade; b) Cumprir pontualmente o horario de trabalho; c) Guardar sigilo absoluto em todos os assuntos da Entidade Empregadora; d) Guardar lealdade a Entidade Empregadora.");
+
+      drawClausula("CLÁUSULA SETIMA - Confidencialidade",
+        "As partes acordam atribuir confidencialidade a toda e qualquer informacao decorrente do presente contrato.");
+
+      drawClausula("CLÁUSULA OITAVA - Disposicoes Finais",
+        "Ambas as partes se obrigam ao integral cumprimento do acordado no presente contrato.");
+
+      y += 10;
+      if (y > 620) { doc.addPage(); y = 100; }
+
+      drawFooter(doc, org);
+      addLine(doc, y); y += 20;
+      doc.font("Helvetica").fontSize(9).fillColor("#333333");
+      doc.text("Feito em duplicado, ambos com valor de original.", ml, y, { align: "center", width: w });
+      y += 20;
+      doc.text(fmtDate(contrato.data_assinatura || contrato.data_inicio), ml, y, { align: "center", width: w });
+      y += 40;
+
+      doc.moveTo(ml + 30, y).lineTo(ml + 220, y).strokeColor("#999999").lineWidth(0.5).stroke();
+      doc.moveTo(pw - ml - 220, y).lineTo(pw - ml - 30, y).stroke();
+      y += 8;
+      doc.strokeColor("#000000");
+      doc.font("Helvetica").fontSize(8).fillColor("#666666");
+      doc.text(org ? org.nome : "Entidade Empregadora", ml + 30, y, { width: 190, align: "center" });
+      doc.text("Trabalhador", pw - ml - 220, y, { width: 190, align: "center" });
     }
-
-    drawClausula("CLÁUSULA PRIMEIRA - Categoria Profissional",
-      "A Entidade Empregadora admite ao seu serviço o trabalhador com a categoria profissional de " + (contrato.funcao || "a definir") + ", ficando este, no que diz respeito ao desempenho das tarefas que lhe forem confiadas, sob autoridade e direccao da Entidade Empregadora.");
-
-    drawClausula("CLÁUSULA SEGUNDA - Duracao",
-      "O presente contrato tem inicio em " + fmtDate(contrato.data_inicio) +
-      (contrato.data_fim ? " e termina em " + fmtDate(contrato.data_fim) + "." : " e vigora por tempo indeterminado.") +
-      (contrato.periodo_experimentacao ? " O periodo de experimentacao e de " + contrato.periodo_experimentacao + " dias." : ""));
-
-    drawClausula("CLÁUSULA TERCEIRA - Local de Trabalho",
-      "O local de prestacao de trabalho sera no estabelecimento da Entidade Empregadora, " + (contrato.local_trabalho || "sede da empresa em Cacuaco, Luanda") + ", ou noutro que venha a possuir, arrendar ou explorar.");
-
-    drawClausula("CLÁUSULA QUARTA - Horario de Trabalho",
-      "O trabalhador obriga-se a prestar " + (contrato.horario_trabalho || "40 horas semanais") + " de trabalho, com intervalo para refeicao, de acordo com o horario em vigor na Entidade Empregadora.");
-
-    drawClausula("CLÁUSULA QUINTA - Retribuicao",
-      "1. Como contrapartida do trabalho prestado, a Entidade Empregadora compromete-se a pagar ao trabalhador a retribuicao mensal de " + fmt(contrato.salario_base) + " " + contrato.moeda + ", sujeita aos descontos legais e paga 12 meses por ano, acrescida de duodecimos de subsidio de natal e de ferias calculados nos termos da lei.\n\n2. As remuneracoes serao pagas ate ao quinto dia util do mes posterior ao que respeitam, atraves de transferencia bancaria.");
-
-    drawClausula("CLÁUSULA SEXTA - Deveres do Trabalhador",
-      "O trabalhador obriga-se a:\na) Comparecer ao servico com assiduidade e realizar o trabalho com zelo e diligencia;\nb) Cumprir pontualmente o horario de trabalho;\nc) Guardar sigilo absoluto em todos os assuntos da Entidade Empregadora;\nd) Nao exercer actividade remunerada fora sem autorizacao escrita;\ne) Guardar lealdade a Entidade Empregadora;\nf) Responsabilizar-se pela guarda dos bens e valores que lhe sejam confiados.");
-
-    drawClausula("CLÁUSULA SETIMA - Confidencialidade",
-      "As partes acordam atribuir confidencialidade a toda e qualquer informacao decorrente do presente contrato. Durante a execucao do contrato e nos anos subsequentes, o trabalhador obriga-se a nao desenvolver actividade que possa conflituar ou concorrer com a actividade da Entidade Empregadora.");
-
-    drawClausula("CLÁUSULA OITAVA - Disposicoes Finais",
-      "Ambas as partes se obrigam ao integral cumprimento do acordado no presente contrato. Para resolucao de quaisquer litigios, as partes convencionam o foro da comarca de Cacuaco.");
-
-    drawClausula("CLÁUSULA NONA - Direito a Informacao",
-      "Foram prestados todos os esclarecimentos e informacoes relativas aos aspectos mais relevantes do contrato, tendo o trabalhador ficado ciente de todos os direitos e obrigacoes decorrentes do presente contrato de trabalho.");
-
-    y += 10;
-
-    // Assinaturas
-    if (y > 620) {
-      doc.addPage();
-      y = 100;
-    }
-
-    drawFooter(doc);
-
-    addLine(doc, y); y += 20;
-
-    doc.font("Helvetica").fontSize(9).fillColor("#333333");
-    doc.text("Feito em duplicado, ambos com valor de original.", ml, y, { align: "center", width: w });
-    y += 20;
-    doc.text(fmtDate(contrato.data_assinatura || contrato.data_inicio), ml, y, { align: "center", width: w });
-    y += 40;
-
-    // Linhas de assinatura
-    doc.moveTo(ml + 30, y).lineTo(ml + 220, y).strokeColor("#999999").lineWidth(0.5).stroke();
-    doc.moveTo(pw - ml - 220, y).lineTo(pw - ml - 30, y).stroke();
-    y += 8;
-    doc.strokeColor("#000000");
-    doc.font("Helvetica").fontSize(8).fillColor("#666666");
-    doc.text("Entidade Empregadora", ml + 30, y, { width: 190, align: "center" });
-    doc.text("Trabalhador", pw - ml - 220, y, { width: 190, align: "center" });
 
     doc.end();
   } catch (e) {
@@ -365,18 +482,19 @@ exports.fichaColaborador = async function (req, res) {
       order: [["data_inicio", "DESC"]],
     });
 
+    var org = await getOrganizacao(colab);
+
     var doc = new PDFDocument({ size: "A4", margin: 50 });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", "attachment; filename=ficha_colaborador_" + colab.numero_colaborador + ".pdf");
     doc.pipe(res);
 
-    drawHeader(doc, "Ficha do Colaborador", colab.numero_colaborador + " | " + colab.nome_completo);
+    drawHeader(doc, "Ficha do Colaborador", colab.numero_colaborador + " | " + colab.nome_completo, org);
 
     var y = 115;
     var ml = 50;
     var w = doc.page.width - 100;
 
-    // Dados Pessoais
     doc.font("Helvetica-Bold").fontSize(12).fillColor("#002b92");
     doc.text("Dados Pessoais", ml, y); y += 20;
     doc.font("Helvetica").fontSize(9).fillColor("#333333");
@@ -408,7 +526,6 @@ exports.fichaColaborador = async function (req, res) {
     y += 6;
     addLine(doc, y); y += 12;
 
-    // Dados Profissionais
     doc.font("Helvetica-Bold").fontSize(12).fillColor("#002b92");
     doc.text("Dados Profissionais", ml, y); y += 20;
     doc.font("Helvetica").fontSize(9).fillColor("#333333");
@@ -430,7 +547,6 @@ exports.fichaColaborador = async function (req, res) {
       }
     }
 
-    // Contrato Activo
     if (contrato) {
       y += 8;
       addLine(doc, y); y += 12;
@@ -457,7 +573,7 @@ exports.fichaColaborador = async function (req, res) {
       }
     }
 
-    drawFooter(doc);
+    drawFooter(doc, org);
     doc.end();
   } catch (e) {
     console.log("Erro ao gerar PDF ficha colaborador:", e.message);

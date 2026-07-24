@@ -58,6 +58,16 @@ var Organizacao = sequelize.define("Organizacao", {
     allowNull: true,
     unique: true,
   },
+  template_contrato: {
+    type: DataTypes.TEXT("long"),
+    allowNull: true,
+    comment: "Template HTML/texto do contrato com placeholders como {NOME_COLABORADOR}, {NIF}, {SALARIO}, etc.",
+  },
+  logo_url: {
+    type: DataTypes.STRING(500),
+    allowNull: true,
+    comment: "URL/caminho do logo da organizacao para cabecalho dos PDFs",
+  },
   activo: {
     type: DataTypes.BOOLEAN,
     defaultValue: true,
