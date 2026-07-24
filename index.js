@@ -27,6 +27,7 @@ var notificacaoRoutes = require("./routers/notificacoes");
 var pedidoRoutes = require("./routers/pedidos");
 var portalRoutes = require("./routers/portal");
 var faltasRoutes = require("./routers/faltas");
+var pdfRoutes = require("./routers/pdf");
 
 var seed = require("./seed");
 var { sequelize } = require("./models");
@@ -95,6 +96,7 @@ app.use("/api/notificacoes", authenticate, notificacaoRoutes);
 app.use("/api/pedidos", authenticate, pedidoRoutes);
 app.use("/api/portal", authenticate, portalRoutes);
 app.use("/api/faltas", authenticate, faltasRoutes);
+app.use("/api/pdf", authenticate, pdfRoutes);
 
 // Health check
 app.get("/health", function (req, res) {
