@@ -44,7 +44,9 @@ var app = express();
 var port = process.env.PORT || 8000;
 
 // Seguranca
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+}));
 app.use(cors({
   origin: process.env.CORS_ORIGIN || "*",
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
