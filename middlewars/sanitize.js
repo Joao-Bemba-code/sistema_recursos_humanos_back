@@ -1,12 +1,6 @@
 var deepSanitize = function (obj) {
   if (typeof obj === "string") {
-    return obj
-      .replace(/<[^>]*>/g, "")
-      .replace(/&/g, "&amp;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#x27;")
-      .replace(/\//g, "&#x2F;")
-      .trim();
+    return obj.replace(/<[^>]*>/g, "").trim();
   }
   if (Array.isArray(obj)) {
     return obj.map(function (item) { return deepSanitize(item); });
@@ -16,7 +10,7 @@ var deepSanitize = function (obj) {
     var keys = Object.keys(obj);
     for (var i = 0; i < keys.length; i++) {
       var key = keys[i];
-      if (key.indexOf("$") === 0 || key.indexOf("_") === 0) {
+      if (key.indexOf("$") === 0) {
         continue;
       }
       sanitized[key] = deepSanitize(obj[key]);

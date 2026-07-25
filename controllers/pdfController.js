@@ -23,16 +23,7 @@ async function getOrganizacao(colab) {
   return null;
 }
 
-function drawHeader(doc, titulo, subtitulo, org) {
-  var orgNome = org ? org.nome : "SGHR";
-  var orgSub = org ? (org.nome_curto || org.nome) : "Sistema de Gestao de Recursos Humanos";
-  doc.rect(0, 0, doc.page.width, 90).fill("#002b92");
-  doc.fillColor("#ffffff").fontSize(22).font("Helvetica-Bold").text(orgNome, 40, 22, { continued: true });
-  doc.fontSize(10).font("Helvetica").text("  " + orgSub, 0, 26, { align: "left" });
-  doc.fontSize(16).font("Helvetica-Bold").text(titulo, 40, 52);
-  doc.fontSize(9).font("Helvetica").text(subtitulo, 40, 70);
-  doc.fillColor("#000000");
-}
+
 
 function drawFooter(doc, org) {
   var orgNome = org ? org.nome : "SGHR";
@@ -64,6 +55,96 @@ function addLine(doc, y) {
   doc.strokeColor("#000000");
 }
 
+function decodeHtmlEntities(str) {
+  if (!str) return "";
+  var entities = {
+    "&amp;": "&", "&lt;": "<", "&gt;": ">",
+    "&quot;": '"', "&#34;": '"', "&#x27;": "'",
+    "&apos;": "'", "&#x2F;": "/", "&#47;": "/",
+    "&nbsp;": " ", "&Agrave;": "À", "&Aacute;": "Á",
+    "&Acirc;": "Â", "&Atilde;": "Ã", "&Auml;": "Ä",
+    "&Egrave;": "È", "&Eacute;": "É", "&Ecirc;": "Ê",
+    "&Euml;": "Ë", "&Igrave;": "Ì", "&Iacute;": "Í",
+    "&Icirc;": "Î", "&Iuml;": "Ï", "&Ograve;": "Ò",
+    "&Oacute;": "Ó", "&Ocirc;": "Ô", "&Otilde;": "Õ",
+    "&Ouml;": "Ö", "&Ugrave;": "Ù", "&Uacute;": "Ú",
+    "&Ucirc;": "Û", "&Uuml;": "Ü", "&Ccedil;": "Ç",
+    "&ccedil;": "ç", "&agrave;": "à", "&aacute;": "á",
+    "&acirc;": "â", "&atilde;": "ã", "&auml;": "ä",
+    "&egrave;": "è", "&eacute;": "é", "&ecirc;": "ê",
+    "&euml;": "ë", "&igrave;": "ì", "&iacute;": "í",
+    "&icirc;": "î", "&iuml;": "ï", "&ograve;": "ò",
+    "&oacute;": "ó", "&ocirc;": "ô", "&otilde;": "õ",
+    "&ouml;": "ö", "&ugrave;": "ù", "&uacute;": "ú",
+    "&ucirc;": "û", "&uuml;": "ü",
+  };
+  var result = str;
+  var keys = Object.keys(entities);
+  for (var pass = 0; pass < 3; pass++) {
+    var changed = false;
+    var prev = result;
+    for (var i = 0; i < keys.length; i++) {
+      result = result.split(keys[i]).join(entities[keys[i]]);
+    }
+    result = result.replace(/&#(\d+);/g, function (m, code) {
+      return String.fromCharCode(parseInt(code, 10));
+    });
+    result = result.replace(/&#x([0-9a-fA-F]+);/g, function (m, hex) {
+      return String.fromCharCode(parseInt(hex, 16));
+    });
+    if (result === prev) break;
+  }
+  return result;
+}
+
+function stripHtmlTags(str) {
+  if (!str) return "";
+  return str.replace(/<[^>]*>/g, "").trim();
+}
+
+function stripGarbageChars(str) {
+  if (!str) return "";
+  var result = "";
+  for (var i = 0; i < str.length; i++) {
+    var code = str.charCodeAt(i);
+    if (code === 9 || code === 10 || code === 13) {
+      result += str[i];
+    } else if (code >= 32 && code <= 126) {
+      result += str[i];
+    } else if ((code >= 192 && code <= 255) || code === 8211 || code === 8212 || code === 8216 || code === 8217 || code === 8220 || code === 8221 || code === 8226 || code === 8364) {
+      result += str[i];
+    }
+  }
+  return result;
+}
+
+function cleanGarbledFragments(str) {
+  if (!str) return "";
+  var result = str;
+  result = result.replace(/[™®©]+/g, "");
+  result = result.replace(/["""]{2,}/g, '"');
+  result = result.replace(/["']\s*[A-Z]{1,3}[Æœ]+[^a-zA-Z]*/g, "");
+  result = result.replace(/[ÆŒ]{2,}[^a-zA-Z]*/g, "");
+  result = result.replace(/[÷§«»]+/g, "");
+  result = result.replace(/\t+/g, " ");
+  result = result.replace(/ {3,}/g, "  ");
+  result = result.replace(/[""'"][A-Z]?[ÆŒÂÃ]+[A-Z]?[ÆŒÂÃ]+[A-Z]?[ÆŒ]+[^\n]*/g, "");
+  result = result.replace(/[–—]{2,}[^\n]*/g, "");
+  result = result.replace(/[òôõöùúûüýÿ]+[^\n]{0,5}[òôõöùúûüýÿ]+/g, "");
+  result = result.replace(/^\s*["""]\s*[A-Z][^\n]*[Æœ][^\n]*/gm, "");
+  result = result.replace(/[^\x00-\x7F]{3,}/g, "");
+  return result;
+}
+
+function normalizeForPdf(str) {
+  if (!str) return "";
+  var result = decodeHtmlEntities(str);
+  result = stripHtmlTags(result);
+  result = stripGarbageChars(result);
+  result = cleanGarbledFragments(result);
+  return result;
+}
+
 function replacePlaceholders(template, vars) {
   var result = template;
   var keys = Object.keys(vars);
@@ -71,6 +152,18 @@ function replacePlaceholders(template, vars) {
     var regex = new RegExp("\\{" + keys[i] + "\\}", "g");
     result = result.replace(regex, vars[keys[i]] || "");
   }
+  result = result.replace(/\(nome completo\)/gi, vars["NOME_COLABORADOR"] || "");
+  result = result.replace(/\(estado civil\)/gi, vars["ESTADO_CIVIL"] || "");
+  result = result.replace(/\(______\)/g, vars["SALARIO_BASE"] || "");
+  result = result.replace(/\( ___\)/g, vars["HORARIO_TRABALHO"] || "");
+  result = result.replace(/\(_____________\)/g, vars["CATEGORIA_PROFISSIONAL"] || "");
+  result = result.replace(/\( ?______\)/g, vars["DATA_INICIO"] || "");
+  result = result.replace(/\(__\)/g, "");
+  result = result.replace(/\(kz[.…]+\)/gi, "");
+  result = result.replace(/NIF[.…]+/g, "NIF " + (vars["NIF_COLABORADOR"] || ""));
+  result = result.replace(/n[úu]mero[.…]+/gi, "n[úu]mero " + (vars["BI_COLABORADOR"] || ""));
+  result = result.replace(/…+/g, "");
+  result = result.replace(/\.\.\.+/g, "");
   return result;
 }
 
@@ -99,23 +192,54 @@ exports.folhaSalarial = async function (req, res) {
     res.setHeader("Content-Disposition", "attachment; filename=recibo_vencimento_" + (colab ? colab.numero_colaborador : "") + ".pdf");
     doc.pipe(res);
 
-    drawHeader(doc, "Recibo de Vencimento", "Mes de " + MESES[pagamento.mes - 1] + " de " + pagamento.ano, org);
+    var ml = 40;
+    var w = doc.page.width - 80;
+    var pw = doc.page.width;
+    var y = 50;
+    var logoHeight = 0;
 
-    var y = 110;
+    if (org && org.logo_url) {
+      try {
+        var logoPath = org.logo_url;
+        if (logoPath.startsWith("/uploads/")) { logoPath = path.join(__dirname, "..", logoPath); }
+        if (fs.existsSync(logoPath)) {
+          doc.image(logoPath, pw / 2 - 40, y, { fit: [80, 80] });
+          logoHeight = 90;
+        }
+      } catch (e) {}
+    }
+
+    y += logoHeight;
+
+    if (org && org.nome) {
+      doc.font("Helvetica-Bold").fontSize(14).fillColor("#000000");
+      doc.text(normalizeForPdf(org.nome), ml, y, { align: "center", width: w });
+      y += 20;
+    }
+
+    doc.font("Helvetica-Bold").fontSize(13).fillColor("#000000");
+    doc.text("Recibo de Vencimento", ml, y, { align: "center", width: w });
+    y += 20;
+
+    doc.font("Helvetica").fontSize(9).fillColor("#555555");
+    doc.text("Mes de " + MESES[pagamento.mes - 1] + " de " + pagamento.ano, ml, y, { align: "center", width: w });
+    y += 20;
+
+    y += 15;
 
     if (colab) {
       doc.fontSize(11).font("Helvetica-Bold").text("Dados do Colaborador", 40, y);
       y += 18;
       doc.fontSize(9).font("Helvetica");
-      doc.text("Nome: " + colab.nome_completo, 40, y); y += 14;
-      doc.text("N. Colaborador: " + colab.numero_colaborador, 40, y); y += 14;
-      if (colab.nif) { doc.text("NIF: " + colab.nif, 40, y); y += 14; }
-      if (colab.numero_seguranca_social) { doc.text("N. Seguranca Social: " + colab.numero_seguranca_social, 40, y); y += 14; }
-      if (colab.conta_bancaria) { doc.text("Conta Bancaria: " + colab.conta_bancaria, 40, y); y += 14; }
+      doc.text("Nome: " + normalizeForPdf(colab.nome_completo), 40, y); y += 14;
+      doc.text("N. Colaborador: " + normalizeForPdf(colab.numero_colaborador), 40, y); y += 14;
+      if (colab.nif) { doc.text("NIF: " + normalizeForPdf(colab.nif), 40, y); y += 14; }
+      if (colab.numero_seguranca_social) { doc.text("N. Seguranca Social: " + normalizeForPdf(colab.numero_seguranca_social), 40, y); y += 14; }
+      if (colab.conta_bancaria) { doc.text("Conta Bancaria: " + normalizeForPdf(colab.conta_bancaria), 40, y); y += 14; }
       y += 6;
     }
 
-    addLine(doc, y); y += 12;
+    y += 12;
 
     doc.fontSize(11).font("Helvetica-Bold").text("Detalhes do Vencimento", 40, y);
     y += 20;
@@ -124,14 +248,14 @@ exports.folhaSalarial = async function (req, res) {
     var col2 = 200;
     var rowH = 16;
 
-    doc.fontSize(9).font("Helvetica-Bold").fillColor("#002b92");
+    doc.fontSize(9).font("Helvetica-Bold").fillColor("#333333");
     doc.text("Descricao", col1, y);
     doc.text("Valores", col2, y);
     y += 16;
-    addLine(doc, y); y += 4;
+    y += 4;
     doc.fillColor("#000000").font("Helvetica");
 
-    doc.font("Helvetica-Bold").fillColor("#15803d").text("VENCIMENTOS", col1, y); y += rowH;
+    doc.font("Helvetica-Bold").fillColor("#333333").text("VENCIMENTOS", col1, y); y += rowH;
     doc.font("Helvetica").fillColor("#000000");
 
     var rows = [
@@ -154,19 +278,19 @@ exports.folhaSalarial = async function (req, res) {
     }
     y += 4;
 
-    doc.font("Helvetica-Bold").fillColor("#002b92");
+    doc.font("Helvetica-Bold").fillColor("#333333");
     doc.text("Total Vencimentos", col1, y);
     doc.text(fmt(pagamento.salario_base) + " Kz", col2, y);
-    y += rowH + 4;
-    addLine(doc, y); y += 8;
+    y += rowH + 12;
 
-    doc.font("Helvetica-Bold").fillColor("#ba1a1a").text("DESCONTOS", col1, y); y += rowH;
+    doc.font("Helvetica-Bold").fillColor("#333333").text("DESCONTOS", col1, y); y += rowH;
     doc.font("Helvetica").fillColor("#000000");
 
     var descontos = [
       ["IRT", pagamento.irt],
       ["Seguranca Social", pagamento.seguranca_social],
       ["Outros Descontos", pagamento.descontos],
+      ["Desconto Faltas", pagamento.desconto_faltas],
     ];
 
     for (var j = 0; j < descontos.length; j++) {
@@ -180,19 +304,16 @@ exports.folhaSalarial = async function (req, res) {
     }
     y += 4;
 
-    var totalDescontos = (parseFloat(pagamento.irt) || 0) + (parseFloat(pagamento.seguranca_social) || 0) + (parseFloat(pagamento.descontos) || 0);
-    doc.font("Helvetica-Bold").fillColor("#ba1a1a");
+    var totalDescontos = (parseFloat(pagamento.irt) || 0) + (parseFloat(pagamento.seguranca_social) || 0) + (parseFloat(pagamento.descontos) || 0) + (parseFloat(pagamento.desconto_faltas) || 0);
+    doc.font("Helvetica-Bold").fillColor("#333333");
     doc.text("Total Descontos", col1, y);
     doc.text("- " + fmt(totalDescontos) + " Kz", col2, y);
-    y += rowH + 4;
-    addLine(doc, y); y += 10;
+    y += rowH + 14;
 
-    doc.fontSize(12).font("Helvetica-Bold").fillColor("#002b92");
+    doc.fontSize(12).font("Helvetica-Bold").fillColor("#333333");
     doc.text("TOTAL LIQUIDO A RECEBER", col1, y);
     doc.text(fmt(pagamento.total_liquido) + " Kz", col2, y);
-    y += 24;
-
-    addLine(doc, y); y += 14;
+    y += 38;
 
     doc.fontSize(9).font("Helvetica").fillColor("#666666");
     doc.text("Estado: " + pagamento.estado, 40, y); y += 14;
@@ -229,30 +350,47 @@ exports.contrato = async function (req, res) {
     res.setHeader("Content-Disposition", "attachment; filename=contrato_trabalho_" + (colab ? colab.numero_colaborador : "") + ".pdf");
     doc.pipe(res);
 
-    // Header with logo
-    var headerH = 100;
-    doc.rect(0, 0, doc.page.width, headerH).fill("#002b92");
-
-    var logoX = 50;
-    var textX = 50;
-    var hasLogo = drawLogo(doc, org, 50, 15, 70, 70);
-    if (hasLogo) {
-      textX = 135;
-    }
-
-    doc.fillColor("#ffffff").fontSize(22).font("Helvetica-Bold");
-    doc.text(org ? org.nome : "SGHR", textX, 18, { width: doc.page.width - textX - 50 });
-    if (org && org.nome_curto) {
-      doc.fontSize(10).font("Helvetica").text(org.nome_curto, textX, 38, { width: doc.page.width - textX - 50 });
-    }
-    doc.fontSize(12).font("Helvetica-Bold").text("CONTRATO DE TRABALHO", textX, 58);
-    doc.fontSize(9).font("Helvetica").text("Ref: " + contrato.numero + " | " + contrato.tipo.replace("_", " "), textX, 76);
-    doc.fillColor("#000000");
-
-    var y = 120;
+    // Logo at top center
+    var y = 50;
     var ml = 50;
     var w = doc.page.width - 100;
     var pw = doc.page.width;
+    var logoHeight = 0;
+
+    if (org && org.logo_url) {
+      try {
+        var logoPath = org.logo_url;
+        if (logoPath.startsWith("/uploads/")) {
+          logoPath = path.join(__dirname, "..", logoPath);
+        }
+        if (fs.existsSync(logoPath)) {
+          doc.image(logoPath, pw / 2 - 40, y, { fit: [80, 80] });
+          logoHeight = 90;
+        }
+      } catch (e) {}
+    }
+
+    y += logoHeight;
+
+    // Organization name
+    if (org && org.nome) {
+      doc.font("Helvetica-Bold").fontSize(14).fillColor("#000000");
+      doc.text(org.nome, ml, y, { align: "center", width: w });
+      y += 20;
+    }
+
+    // Contract title
+    doc.font("Helvetica-Bold").fontSize(13).fillColor("#000000");
+    doc.text("CONTRATO DE TRABALHO", ml, y, { align: "center", width: w });
+    y += 20;
+
+    // Contract ref and type
+    doc.font("Helvetica").fontSize(9).fillColor("#333333");
+    doc.text("Ref: " + contrato.numero + " | " + contrato.tipo.replace("_", " "), ml, y, { align: "center", width: w });
+    y += 20;
+
+    // Line separator
+    addLine(doc, y); y += 15;
 
     // Se a organizacao tem template, usar template com placeholders
     if (org && org.template_contrato) {
@@ -284,7 +422,7 @@ exports.contrato = async function (req, res) {
         "PAIS_ORGANIZACAO": org ? (org.pais || "Angola") : "",
       };
 
-      var templateTexto = replacePlaceholders(org.template_contrato, placeholders);
+      var templateTexto = normalizeForPdf(replacePlaceholders(org.template_contrato, placeholders));
 
       // Draw template text line by line
       var linhas = templateTexto.split("\n");
@@ -305,7 +443,7 @@ exports.contrato = async function (req, res) {
         var isTitle = linha.match(/^(CLAUSULA|CLÁUSULA|ARTIGO|SECCAO|SECÇÃO|TITULO|CAPITULO|CAPÍTULO)/i);
         if (isTitle) {
           y += 4;
-          doc.font("Helvetica-Bold").fontSize(10).fillColor("#002b92");
+          doc.font("Helvetica-Bold").fontSize(10).fillColor("#333333");
           doc.text(linha.trim(), ml, y, { width: w });
           y = doc.y + 6;
           doc.font("Helvetica").fontSize(9).fillColor("#333333");
@@ -377,7 +515,7 @@ exports.contrato = async function (req, res) {
       addLine(doc, y); y += 14;
 
       // Dados da Entidade
-      doc.font("Helvetica-Bold").fontSize(11).fillColor("#002b92");
+      doc.font("Helvetica-Bold").fontSize(11).fillColor("#333333");
       doc.text("ENTIDADE EMPREGADORA", ml, y);
       y += 18;
       doc.font("Helvetica").fontSize(9).fillColor("#333333");
@@ -386,7 +524,7 @@ exports.contrato = async function (req, res) {
       doc.text("Sede: " + (org ? ((org.endereco || "") + ", " + (org.cidade || "") + ", " + (org.pais || "Angola")) : "—"), ml, y); y += 20;
 
       // Dados do Trabalhador
-      doc.font("Helvetica-Bold").fontSize(11).fillColor("#002b92");
+      doc.font("Helvetica-Bold").fontSize(11).fillColor("#333333");
       doc.text("TRABALHADOR", ml, y);
       y += 18;
       doc.font("Helvetica").fontSize(9).fillColor("#333333");
@@ -406,7 +544,7 @@ exports.contrato = async function (req, res) {
       // Clausulas padrao
       function drawClausula(titulo, texto) {
         if (y > 680) { doc.addPage(); y = 50; }
-        doc.font("Helvetica-Bold").fontSize(10).fillColor("#002b92");
+        doc.font("Helvetica-Bold").fontSize(10).fillColor("#333333");
         doc.text(titulo, ml, y);
         y += 16;
         doc.font("Helvetica").fontSize(9).fillColor("#333333");
@@ -489,68 +627,107 @@ exports.fichaColaborador = async function (req, res) {
     res.setHeader("Content-Disposition", "attachment; filename=ficha_colaborador_" + colab.numero_colaborador + ".pdf");
     doc.pipe(res);
 
-    drawHeader(doc, "Ficha do Colaborador", colab.numero_colaborador + " | " + colab.nome_completo, org);
-
-    var y = 115;
     var ml = 50;
     var w = doc.page.width - 100;
+    var pw = doc.page.width;
+    var y = 50;
+    var logoHeight = 0;
 
-    doc.font("Helvetica-Bold").fontSize(12).fillColor("#002b92");
+    if (org && org.logo_url) {
+      try {
+        var logoPath = org.logo_url;
+        if (logoPath.startsWith("/uploads/")) { logoPath = path.join(__dirname, "..", logoPath); }
+        if (fs.existsSync(logoPath)) {
+          doc.image(logoPath, pw / 2 - 40, y, { fit: [80, 80] });
+          logoHeight = 90;
+        }
+      } catch (e) {}
+    }
+
+    y += logoHeight;
+
+    if (org && org.nome) {
+      doc.font("Helvetica-Bold").fontSize(14).fillColor("#000000");
+      doc.text(normalizeForPdf(org.nome), ml, y, { align: "center", width: w });
+      y += 20;
+    }
+
+    doc.font("Helvetica-Bold").fontSize(13).fillColor("#000000");
+    doc.text("Ficha do Colaborador", ml, y, { align: "center", width: w });
+    y += 20;
+
+    doc.font("Helvetica").fontSize(9).fillColor("#555555");
+    doc.text(colab.numero_colaborador + " | " + normalizeForPdf(colab.nome_completo), ml, y, { align: "center", width: w });
+    y += 20;
+
+    y += 15;
+
+    if (colab.fotografia) {
+      try {
+        var photoPath = decodeHtmlEntities(colab.fotografia);
+        if (photoPath.startsWith("/uploads/")) {
+          photoPath = path.join(__dirname, "..", photoPath);
+        }
+        if (fs.existsSync(photoPath)) {
+          doc.image(photoPath, pw - 130, y - 30, { fit: [75, 95] });
+        }
+      } catch (e) {}
+    }
+
+    doc.font("Helvetica-Bold").fontSize(12).fillColor("#333333");
     doc.text("Dados Pessoais", ml, y); y += 20;
     doc.font("Helvetica").fontSize(9).fillColor("#333333");
 
     var dados = [
-      ["Nome Completo", colab.nome_completo],
-      ["N. Colaborador", colab.numero_colaborador],
+      ["Nome Completo", normalizeForPdf(colab.nome_completo)],
+      ["N. Colaborador", normalizeForPdf(colab.numero_colaborador)],
       ["Data de Nascimento", colab.data_nascimento],
       ["Genero", colab.genero === "M" ? "Masculino" : colab.genero === "F" ? "Feminino" : colab.genero],
-      ["Estado Civil", colab.estado_civil],
+      ["Estado Civil", normalizeForPdf(colab.estado_civil)],
       ["NIF", colab.nif],
       ["BI", colab.bi],
-      ["Email Institucional", colab.email_institucional],
-      ["Email Pessoal", colab.email_pessoal],
+      ["Email Institucional", normalizeForPdf(colab.email_institucional)],
+      ["Email Pessoal", normalizeForPdf(colab.email_pessoal)],
       ["Telefone", colab.telefone],
-      ["Endereco", colab.endereco],
-      ["Cidade", colab.cidade],
-      ["Provincia", colab.provincia],
+      ["Endereco", normalizeForPdf(colab.endereco)],
+      ["Cidade", normalizeForPdf(colab.cidade)],
+      ["Provincia", normalizeForPdf(colab.provincia)],
     ];
 
     for (var i = 0; i < dados.length; i++) {
       if (dados[i][1]) {
-        doc.font("Helvetica-Bold").text(dados[i][0] + ": ", ml, y, { continued: true, width: 200 });
-        doc.font("Helvetica").text(" " + dados[i][1], ml + 130, y - 12, { width: w - 140 });
-        y = doc.y + 4;
+        doc.font("Helvetica-Bold").fontSize(9).fillColor("#333333").text(dados[i][0], ml, y);
+        doc.font("Helvetica").fillColor("#555555").text(dados[i][1], ml + 130, y);
+        y += 14;
       }
     }
 
-    y += 6;
-    addLine(doc, y); y += 12;
+    y += 18;
 
-    doc.font("Helvetica-Bold").fontSize(12).fillColor("#002b92");
+    doc.font("Helvetica-Bold").fontSize(12).fillColor("#333333");
     doc.text("Dados Profissionais", ml, y); y += 20;
     doc.font("Helvetica").fontSize(9).fillColor("#333333");
 
     var prof = [
-      ["Tipo de Colaborador", colab.tipo_colaborador],
+      ["Tipo de Colaborador", normalizeForPdf(colab.tipo_colaborador)],
       ["Estado", colab.estado],
       ["Data de Admissao", colab.data_admissao],
       ["N. Seguranca Social", colab.numero_seguranca_social],
-      ["Habilitacoes", colab.habilitacoes],
-      ["Formacao Academica", colab.formacao_academica],
+      ["Habilitacoes", normalizeForPdf(colab.habilitacoes)],
+      ["Formacao Academica", normalizeForPdf(colab.formacao_academica)],
     ];
 
     for (var j = 0; j < prof.length; j++) {
       if (prof[j][1]) {
-        doc.font("Helvetica-Bold").text(prof[j][0] + ": ", ml, y, { continued: true, width: 200 });
-        doc.font("Helvetica").text(" " + prof[j][1], ml + 130, y - 12, { width: w - 140 });
-        y = doc.y + 4;
+        doc.font("Helvetica-Bold").fontSize(9).fillColor("#333333").text(prof[j][0], ml, y);
+        doc.font("Helvetica").fillColor("#555555").text(prof[j][1], ml + 130, y);
+        y += 14;
       }
     }
 
     if (contrato) {
-      y += 8;
-      addLine(doc, y); y += 12;
-      doc.font("Helvetica-Bold").fontSize(12).fillColor("#002b92");
+      y += 20;
+      doc.font("Helvetica-Bold").fontSize(12).fillColor("#333333");
       doc.text("Contrato Activo", ml, y); y += 20;
       doc.font("Helvetica").fontSize(9).fillColor("#333333");
 
@@ -566,9 +743,9 @@ exports.fichaColaborador = async function (req, res) {
 
       for (var k = 0; k < ctr.length; k++) {
         if (ctr[k][1]) {
-          doc.font("Helvetica-Bold").text(ctr[k][0] + ": ", ml, y, { continued: true, width: 200 });
-          doc.font("Helvetica").text(" " + ctr[k][1], ml + 130, y - 12, { width: w - 140 });
-          y = doc.y + 4;
+          doc.font("Helvetica-Bold").fontSize(9).fillColor("#333333").text(ctr[k][0], ml, y);
+          doc.font("Helvetica").fillColor("#555555").text(ctr[k][1], ml + 130, y);
+          y += 14;
         }
       }
     }
