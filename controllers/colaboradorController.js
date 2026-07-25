@@ -115,13 +115,18 @@ var update = async function (req, res) {
     }
 
     var camposProtegidos = ["id", "organizacao_id", "numero_colaborador", "createdAt", "updatedAt"];
+    var camposEnum = ["genero", "estado_civil", "tipo_colaborador", "estado"];
+    var camposData = ["data_nascimento", "bi_validade", "data_admissao", "data_desligamento"];
     var dadosActualizar = {};
 
     var keys = Object.keys(req.body);
     for (var i = 0; i < keys.length; i++) {
-      if (camposProtegidos.indexOf(keys[i]) === -1) {
-        dadosActualizar[keys[i]] = req.body[keys[i]];
-      }
+      if (camposProtegidos.indexOf(keys[i]) !== -1) continue;
+      var valor = req.body[keys[i]];
+      if (valor === "" && camposEnum.indexOf(keys[i]) !== -1) continue;
+      if (valor === "" && camposData.indexOf(keys[i]) !== -1) { dadosActualizar[keys[i]] = null; continue; }
+      if (valor === undefined) continue;
+      dadosActualizar[keys[i]] = valor;
     }
 
     await colaborador.update(dadosActualizar);
@@ -138,7 +143,8 @@ var update = async function (req, res) {
       dados: actualizado,
     });
   } catch (e) {
-    return res.status(500).json({ error: "Erro interno do servidor" });
+    console.log("Erro ao actualizar colaborador:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor", detalhe: e.message });
   }
 };
 

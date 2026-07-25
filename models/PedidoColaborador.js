@@ -47,6 +47,10 @@ var PedidoColaborador = sequelize.define("PedidoColaborador", {
     type: DataTypes.TEXT,
     allowNull: true,
   },
+  documento: {
+    type: DataTypes.STRING(500),
+    allowNull: true,
+  },
 }, {
   tableName: "pedidos_colaborador",
   timestamps: true,

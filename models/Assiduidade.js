@@ -39,6 +39,18 @@ var RegistoPresenca = sequelize.define("RegistoPresenca", {
     type: DataTypes.TEXT,
     allowNull: true,
   },
+  justificado: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
+  documento_justificacao: {
+    type: DataTypes.STRING(500),
+    allowNull: true,
+  },
+  justificacao_observacoes: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
 }, {
   tableName: "registos_presenca",
   timestamps: true,

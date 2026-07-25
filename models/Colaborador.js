@@ -132,6 +132,10 @@ var Colaborador = sequelize.define("Colaborador", {
     type: DataTypes.TEXT,
     allowNull: true,
   },
+  organizacao_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
 }, {
   tableName: "colaboradores",
   timestamps: true,

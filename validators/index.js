@@ -23,7 +23,7 @@ var authValidation = [
     .trim()
     .escape(),
   body("password")
-    .isLength({ min: 6 }).withMessage("Password deve ter pelo menos 6 caracteres"),
+    .notEmpty().withMessage("Password é obrigatória"),
   body("nome_completo")
     .optional()
     .isLength({ min: 3, max: 200 }).withMessage("Nome completo obrigatório")

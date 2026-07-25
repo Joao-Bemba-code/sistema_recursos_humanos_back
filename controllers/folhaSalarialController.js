@@ -1,5 +1,5 @@
 var { Op } = require("sequelize");
-var { Vencimento, Pagamento, Colaborador } = require("../models");
+var { sequelize, Vencimento, Pagamento, Colaborador, RegistoPresenca } = require("../models");
 
 // ==================== VENCIMENTOS ====================
 
@@ -81,6 +81,89 @@ var calcularTotais = function (dados) {
   dados.total_liquido = Math.round((dados.total_bruto - descIrt - descSS - outrosDesc) * 100) / 100;
 
   return dados;
+};
+
+var calcularDescontoFaltas = async function (colaborador_id, mes, ano) {
+  try {
+    var dataInicio = new Date(ano, mes - 1, 1);
+    var dataFim = new Date(ano, mes, 0);
+    var strInicio = dataInicio.toISOString().split("T")[0];
+    var strFim = dataFim.toISOString().split("T")[0];
+
+    var faltas = await RegistoPresenca.findAll({
+      where: {
+        colaborador_id: colaborador_id,
+        estado: { [Op.in]: ["Ausente", "Atrasado"] },
+        justificado: false,
+        data: { [Op.between]: [strInicio, strFim] },
+      },
+      attributes: ["id", "data", "estado", "hora_entrada"],
+    });
+
+    if (faltas.length === 0) return 0;
+
+    var vencResult = await sequelize.query(
+      "SELECT salario_base FROM contratos WHERE colaborador_id = ? AND estado = 'Activo' LIMIT 1",
+      { replacements: [colaborador_id], type: sequelize.QueryTypes.SELECT }
+    );
+
+    if (!vencResult || vencResult.length === 0) {
+      vencResult = await sequelize.query(
+        "SELECT salario_base FROM contratos WHERE colaborador_id = ? ORDER BY createdAt DESC LIMIT 1",
+        { replacements: [colaborador_id], type: sequelize.QueryTypes.SELECT }
+      );
+    }
+
+    if (!vencResult || vencResult.length === 0) return 0;
+
+    var salarioDiario = parseFloat(vencResult[0].salario_base) / 30;
+    var salarioHora = salarioDiario / 8;
+    var horasDescontar = 0;
+
+    faltas.forEach(function (f) {
+      if (f.estado === "Ausente") {
+        horasDescontar += 8;
+      } else if (f.estado === "Atrasado" && f.hora_entrada) {
+        var partes = f.hora_entrada.split(":");
+        var minsEntrada = parseInt(partes[0]) * 60 + parseInt(partes[1]);
+        var minsNormais = 8 * 60;
+        if (minsEntrada > minsNormais) {
+          horasDescontar += Math.round(((minsEntrada - minsNormais) / 60) * 100) / 100;
+        }
+      }
+    });
+
+    return Math.round(horasDescontar * salarioHora * 100) / 100;
+  } catch (e) {
+    console.log("Erro ao calcular desconto de faltas:", e.message);
+    return 0;
+  }
+};
+
+var getContratoActual = async function (req, res) {
+  try {
+    var { colaborador_id } = req.params;
+    console.log("DEBUG buscar contrato para:", colaborador_id);
+    var contrato = await sequelize.query(
+      "SELECT salario_base FROM contratos WHERE colaborador_id = ? AND estado = 'Activo' ORDER BY createdAt DESC LIMIT 1",
+      { replacements: [colaborador_id], type: sequelize.QueryTypes.SELECT }
+    );
+    console.log("DEBUG contrato activo:", JSON.stringify(contrato));
+    if (!contrato || contrato.length === 0) {
+      contrato = await sequelize.query(
+        "SELECT salario_base FROM contratos WHERE colaborador_id = ? ORDER BY createdAt DESC LIMIT 1",
+        { replacements: [colaborador_id], type: sequelize.QueryTypes.SELECT }
+      );
+      console.log("DEBUG contrato fallback:", JSON.stringify(contrato));
+    }
+    if (!contrato || contrato.length === 0) {
+      return res.status(404).json({ error: "Nenhum contrato encontrado para este colaborador" });
+    }
+    return res.status(200).json({ dados: contrato[0] });
+  } catch (e) {
+    console.log("Erro ao buscar contrato activo:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
 };
 
 var createVencimento = async function (req, res) {
@@ -226,8 +309,8 @@ var createPagamento = async function (req, res) {
   try {
     var dados = req.body;
 
-    if (!dados.colaborador_id || !dados.mes || !dados.ano || !dados.salario_base) {
-      return res.status(400).json({ error: "colaborador_id, mes, ano e salario_base sao obrigatorios" });
+    if (!dados.colaborador_id || !dados.mes || !dados.ano) {
+      return res.status(400).json({ error: "colaborador_id, mes e ano sao obrigatorios" });
     }
 
     var existente = await Pagamento.findOne({
@@ -236,6 +319,31 @@ var createPagamento = async function (req, res) {
     if (existente) {
       return res.status(409).json({ error: "Ja existe pagamento registado para este colaborador neste mes/ano" });
     }
+
+    if (!dados.salario_base) {
+      var contrato = await sequelize.query(
+        "SELECT salario_base FROM contratos WHERE colaborador_id = ? AND estado = 'Activo' ORDER BY createdAt DESC LIMIT 1",
+        { replacements: [dados.colaborador_id], type: sequelize.QueryTypes.SELECT }
+      );
+      if (contrato && contrato.length > 0) {
+        dados.salario_base = contrato[0].salario_base;
+      } else {
+        return res.status(400).json({ error: "Colaborador nao possui contrato activo com salario definido" });
+      }
+    }
+
+    var toNum = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; };
+    dados.salario_base = toNum(dados.salario_base);
+    dados.subsidios = toNum(dados.subsidios);
+    dados.horas_extras = toNum(dados.horas_extras);
+    dados.descontos = toNum(dados.descontos);
+    dados.irt = toNum(dados.irt);
+    dados.seguranca_social = toNum(dados.seguranca_social);
+
+    var descontoFaltas = await calcularDescontoFaltas(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano));
+    dados.desconto_faltas = descontoFaltas;
+
+    dados.total_liquido = Math.round((dados.salario_base + dados.subsidios + dados.horas_extras - dados.descontos - dados.irt - dados.seguranca_social - descontoFaltas) * 100) / 100;
 
     var pagamento = await Pagamento.create(dados);
 
@@ -286,4 +394,56 @@ var updatePagamento = async function (req, res) {
   }
 };
 
-module.exports = { listVencimentos, getVencimento, createVencimento, updateVencimento, removeVencimentos, listPagamentos, createPagamento, updatePagamento };
+var recalcularFaltas = async function (req, res) {
+  try {
+    var pagamento = await Pagamento.findByPk(req.params.id);
+    if (!pagamento) {
+      return res.status(404).json({ error: "Pagamento nao encontrado" });
+    }
+
+    var descontoFaltas = await calcularDescontoFaltas(pagamento.colaborador_id, pagamento.mes, pagamento.ano);
+
+    var sb = parseFloat(pagamento.salario_base) || 0;
+    var sub = parseFloat(pagamento.subsidios) || 0;
+    var he = parseFloat(pagamento.horas_extras) || 0;
+    var desc = parseFloat(pagamento.descontos) || 0;
+    var irt = parseFloat(pagamento.irt) || 0;
+    var ss = parseFloat(pagamento.seguranca_social) || 0;
+    var totalLiquido = Math.round((sb + sub + he - desc - irt - ss - descontoFaltas) * 100) / 100;
+
+    await pagamento.update({
+      desconto_faltas: descontoFaltas,
+      total_liquido: totalLiquido,
+    });
+
+    var actualizado = await Pagamento.findByPk(req.params.id, {
+      include: [
+        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
+      ],
+    });
+
+    return res.status(200).json({
+      mensagem: "Desconto de faltas recalculado com sucesso",
+      dados: actualizado,
+    });
+  } catch (e) {
+    console.log("Erro ao recalcular faltas:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+var removePagamento = async function (req, res) {
+  try {
+    var pagamento = await Pagamento.findByPk(req.params.id);
+    if (!pagamento) {
+      return res.status(404).json({ error: "Pagamento nao encontrado" });
+    }
+    await pagamento.destroy();
+    return res.status(200).json({ mensagem: "Pagamento eliminado com sucesso" });
+  } catch (e) {
+    console.log("Erro ao eliminar pagamento:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+module.exports = { listVencimentos, getVencimento, createVencimento, updateVencimento, removeVencimentos, listPagamentos, createPagamento, updatePagamento, removePagamento, recalcularFaltas, getContratoActual };

@@ -1,5 +1,7 @@
-var { Op, fn, col, literal } = require("sequelize");
-var { RegistoPresenca, Colaborador, Vencimento } = require("../models");
+var { Op } = require("sequelize");
+var path = require("path");
+var fs = require("fs");
+var { sequelize, RegistoPresenca, Colaborador, Vencimento } = require("../models");
 
 var resumo = async function (req, res) {
   try {
@@ -25,7 +27,7 @@ var resumo = async function (req, res) {
       include: [
         { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "utilizador_id"], where: { organizacao_id: org_id } },
       ],
-      attributes: ["id", "data", "observacoes"],
+      attributes: ["id", "data", "observacoes", "justificado", "documento_justificacao", "justificacao_observacoes"],
       order: [["data", "DESC"]],
     });
 
@@ -34,7 +36,7 @@ var resumo = async function (req, res) {
       include: [
         { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "utilizador_id"], where: { organizacao_id: org_id } },
       ],
-      attributes: ["id", "data", "hora_entrada", "hora_saida", "horas_trabalhadas", "observacoes"],
+      attributes: ["id", "data", "hora_entrada", "hora_saida", "horas_trabalhadas", "observacoes", "justificado", "documento_justificacao", "justificacao_observacoes"],
       order: [["data", "DESC"]],
     });
 
@@ -50,9 +52,12 @@ var resumo = async function (req, res) {
         nome_completo: c.nome_completo,
         numero_colaborador: c.numero_colaborador,
         total_faltas: 0,
+        total_faltas_justificadas: 0,
         total_atrasos: 0,
+        total_atrasos_justificados: 0,
         minutos_atraso_total: 0,
         horas_descontar: 0,
+        horas_descontar_efectivo: 0,
         desconto_previsto: 0,
         faltas_detalhe: [],
         atrasos_detalhe: [],
@@ -63,8 +68,21 @@ var resumo = async function (req, res) {
       var cid = f.colaborador.id;
       if (!resumoColab[cid]) return;
       resumoColab[cid].total_faltas++;
-      resumoColab[cid].horas_descontar += 8;
-      resumoColab[cid].faltas_detalhe.push({ data: f.data, observacoes: f.observacoes });
+      var justificado = f.justificado || false;
+      if (justificado) {
+        resumoColab[cid].total_faltas_justificadas++;
+      } else {
+        resumoColab[cid].horas_descontar += 8;
+        resumoColab[cid].horas_descontar_efectivo += 8;
+      }
+      resumoColab[cid].faltas_detalhe.push({
+        id: f.id,
+        data: f.data,
+        observacoes: f.observacoes,
+        justificado: justificado,
+        documento_justificacao: f.documento_justificacao,
+        justificacao_observacoes: f.justificacao_observacoes,
+      });
     });
 
     atrasos.forEach(function (a) {
@@ -82,25 +100,47 @@ var resumo = async function (req, res) {
       }
       resumoColab[cid].minutos_atraso_total += mins;
       var horasAtraso = Math.round((mins / 60) * 100) / 100;
-      resumoColab[cid].horas_descontar += horasAtraso;
-      resumoColab[cid].atrasos_detalhe.push({ data: a.data, hora_entrada: a.hora_entrada, minutos: mins, observacoes: a.observacoes });
+      var justificado = a.justificado || false;
+      if (!justificado) {
+        resumoColab[cid].horas_descontar += horasAtraso;
+        resumoColab[cid].horas_descontar_efectivo += horasAtraso;
+      }
+      if (justificado) {
+        resumoColab[cid].total_atrasos_justificados++;
+      }
+      resumoColab[cid].atrasos_detalhe.push({
+        id: a.id,
+        data: a.data,
+        hora_entrada: a.hora_entrada,
+        minutos: mins,
+        observacoes: a.observacoes,
+        justificado: justificado,
+        documento_justificacao: a.documento_justificacao,
+        justificacao_observacoes: a.justificacao_observacoes,
+      });
     });
 
     var colaboradorIds = Object.keys(resumoColab);
     if (colaboradorIds.length > 0) {
-      var vencimentos = await Vencimento.findAll({
-        where: {
-          colaborador_id: { [Op.in]: colaboradorIds },
-          estado: "Activo",
-        },
-        attributes: ["colaborador_id", "salario_base"],
-      });
-      vencimentos.forEach(function (v) {
-        if (resumoColab[v.colaborador_id]) {
-          var salarioDiario = parseFloat(v.salario_base) / 30;
-          var salarioHora = salarioDiario / 8;
-          resumoColab[v.colaborador_id].desconto_previsto = Math.round(resumoColab[v.colaborador_id].horas_descontar * salarioHora * 100) / 100;
+      var placeholders = colaboradorIds.map(function() { return "?"; }).join(",");
+      var vencResult = await sequelize.query(
+        "SELECT colaborador_id, salario_base FROM contratos WHERE colaborador_id IN (" + placeholders + ") AND estado = 'Activo' ORDER BY createdAt DESC",
+        { replacements: colaboradorIds, type: sequelize.QueryTypes.SELECT }
+      );
+
+      var vencPorColab = {};
+      vencResult.forEach(function (v) {
+        if (v.colaborador_id && resumoColab[v.colaborador_id] && !vencPorColab[v.colaborador_id]) {
+          vencPorColab[v.colaborador_id] = v;
         }
+      });
+
+      Object.keys(vencPorColab).forEach(function (cid) {
+        var v = vencPorColab[cid];
+        var salarioDiario = parseFloat(v.salario_base) / 30;
+        var salarioHora = salarioDiario / 8;
+        resumoColab[cid].salario_hora = salarioHora;
+        resumoColab[cid].desconto_previsto = Math.round(resumoColab[cid].horas_descontar_efectivo * salarioHora * 100) / 100;
       });
     }
 
@@ -164,6 +204,7 @@ var registros = async function (req, res) {
       include: [
         { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"], where: { organizacao_id: org_id } },
       ],
+      attributes: ["id", "data", "estado", "hora_entrada", "hora_saida", "horas_trabalhadas", "observacoes", "justificado", "documento_justificacao", "justificacao_observacoes"],
       order: [["data", "DESC"]],
       limit: limit,
       offset: offset,
@@ -184,4 +225,104 @@ var registros = async function (req, res) {
   }
 };
 
-module.exports = { resumo, registros };
+var justificar = async function (req, res) {
+  try {
+    var { id } = req.params;
+    var { justificacao_observacoes } = req.body;
+
+    var registo = await RegistoPresenca.findByPk(id);
+    if (!registo) {
+      return res.status(404).json({ error: "Registo nao encontrado" });
+    }
+
+    if (registo.estado !== "Ausente" && registo.estado !== "Atrasado") {
+      return res.status(400).json({ error: "Apenas faltas e atrasos podem ser justificados" });
+    }
+
+    var updateData = {
+      justificado: true,
+      justificacao_observacoes: justificacao_observacoes || null,
+    };
+
+    if (req.files && req.files.documento) {
+      var doc = req.files.documento;
+      var ext = path.extname(doc.name) || ".pdf";
+      var filename = "justificacao_" + id + "_" + Date.now() + ext;
+      var uploadDir = path.join(__dirname, "..", "uploads", "justificacoes");
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      var caminho = path.join(uploadDir, filename);
+      await doc.mv(caminho);
+      updateData.documento_justificacao = "/uploads/justificacoes/" + filename;
+    }
+
+    await registo.update(updateData);
+
+    return res.status(200).json({
+      mensagem: "Falta justificada com sucesso",
+      dados: registo,
+    });
+  } catch (e) {
+    console.log("Erro ao justificar falta:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+var removerJustificacao = async function (req, res) {
+  try {
+    var { id } = req.params;
+
+    var registo = await RegistoPresenca.findByPk(id);
+    if (!registo) {
+      return res.status(404).json({ error: "Registo nao encontrado" });
+    }
+
+    if (!registo.justificado) {
+      return res.status(400).json({ error: "Este registo nao possui justificacao" });
+    }
+
+    if (registo.documento_justificacao) {
+      var caminhoAntigo = path.join(__dirname, "..", registo.documento_justificacao);
+      if (fs.existsSync(caminhoAntigo)) {
+        fs.unlinkSync(caminhoAntigo);
+      }
+    }
+
+    await registo.update({
+      justificado: false,
+      documento_justificacao: null,
+      justificacao_observacoes: null,
+    });
+
+    return res.status(200).json({
+      mensagem: "Justificacao removida com sucesso",
+      dados: registo,
+    });
+  } catch (e) {
+    console.log("Erro ao remover justificacao:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+var eliminar = async function (req, res) {
+  try {
+    var { id } = req.params;
+
+    var registo = await RegistoPresenca.findByPk(id);
+    if (!registo) {
+      return res.status(404).json({ error: "Registo nao encontrado" });
+    }
+
+    await registo.destroy();
+
+    return res.status(200).json({
+      mensagem: "Falta eliminada com sucesso",
+    });
+  } catch (e) {
+    console.log("Erro ao eliminar falta:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+module.exports = { resumo, registros, justificar, removerJustificacao, eliminar };

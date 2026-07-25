@@ -11,7 +11,7 @@ var auditoria = function (modulo, accao) {
             utilizador_id: req.utilizador ? req.utilizador.id : null,
             accao: accao,
             modulo: modulo,
-            ip_address: req.ip || req.connection ? req.connection.remoteAddress : null,
+            ip_address: req.ip || (req.connection ? req.connection.remoteAddress : null),
             user_agent: req.headers ? req.headers["user-agent"] : null,
           };
 

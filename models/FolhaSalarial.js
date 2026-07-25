@@ -7,6 +7,10 @@ var Vencimento = sequelize.define("Vencimento", {
     defaultValue: DataTypes.UUIDV4,
     primaryKey: true,
   },
+  colaborador_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
   salario_base: {
     type: DataTypes.DECIMAL(12, 2),
     allowNull: false,
@@ -99,6 +103,10 @@ var Pagamento = sequelize.define("Pagamento", {
     defaultValue: 0,
   },
   seguranca_social: {
+    type: DataTypes.DECIMAL(12, 2),
+    defaultValue: 0,
+  },
+  desconto_faltas: {
     type: DataTypes.DECIMAL(12, 2),
     defaultValue: 0,
   },

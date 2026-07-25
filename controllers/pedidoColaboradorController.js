@@ -1,5 +1,7 @@
 var { Op } = require("sequelize");
-var { PedidoColaborador, Colaborador, Utilizador, Perfil, Notificacao } = require("../models");
+var path = require("path");
+var fs = require("fs");
+var { PedidoColaborador, Colaborador, Utilizador, Perfil, Notificacao, RegistoPresenca } = require("../models");
 var notificacaoController = require("./notificacaoController");
 
 var list = async function (req, res) {
@@ -107,6 +109,11 @@ var create = async function (req, res) {
       return res.status(400).json({ error: "Colaborador nao encontrado para o utilizador actual" });
     }
 
+    var dadosParsed = dados.dados || null;
+    if (typeof dadosParsed === "string") {
+      try { dadosParsed = JSON.parse(dadosParsed); } catch (e) { dadosParsed = { raw: dadosParsed }; }
+    }
+
     var pedido = await PedidoColaborador.create({
       organizacao_id: req.utilizador.organizacao_id,
       colaborador_id: colaborador.id,
@@ -114,8 +121,21 @@ var create = async function (req, res) {
       titulo: dados.titulo,
       descricao: dados.descricao || null,
       estado: "pendente",
-      dados: dados.dados || null,
+      dados: dadosParsed,
     });
+
+    if (req.files && req.files.ficheiro) {
+      var ficheiro = req.files.ficheiro;
+      var ext = path.extname(ficheiro.name) || ".pdf";
+      var filename = "pedido_" + pedido.id + "_" + Date.now() + ext;
+      var uploadDir = path.join(__dirname, "..", "uploads", "pedidos");
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      var caminho = path.join(uploadDir, filename);
+      await ficheiro.mv(caminho);
+      await pedido.update({ documento: "/uploads/pedidos/" + filename });
+    }
 
     var resultado = await PedidoColaborador.findByPk(pedido.id, {
       include: [
@@ -190,6 +210,36 @@ var updateEstado = async function (req, res) {
       responded_at: new Date(),
       comentario: req.body.comentario || null,
     });
+
+    if (novoEstado === "aprovado" && pedido.tipo === "justificacao") {
+      try {
+        var dadosJustificacao = null;
+        if (pedido.dados) {
+          dadosJustificacao = typeof pedido.dados === "string" ? JSON.parse(pedido.dados) : pedido.dados;
+        }
+        var registo = null;
+        if (dadosJustificacao && dadosJustificacao.registos_presenca_id) {
+          registo = await RegistoPresenca.findByPk(dadosJustificacao.registos_presenca_id);
+        }
+        if (!registo && dadosJustificacao && dadosJustificacao.data) {
+          registo = await RegistoPresenca.findOne({
+            where: {
+              colaborador_id: pedido.colaborador_id,
+              data: dadosJustificacao.data,
+            },
+          });
+        }
+        if (registo) {
+          await registo.update({
+            justificado: true,
+            justificacao_observacoes: pedido.comentario || dadosJustificacao.tipo || null,
+          });
+          console.log("Falta justificada via pedido:", registo.id, "data:", registo.data);
+        }
+      } catch (justErr) {
+        console.log("Erro ao justificar falta via pedido:", justErr.message);
+      }
+    }
 
     var utilizadorColaborador = null;
     if (pedido.colaborador && pedido.colaborador.utilizador_id) {

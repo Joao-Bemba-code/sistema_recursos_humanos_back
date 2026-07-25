@@ -1,4 +1,5 @@
-var { Colaborador, Ferias, SolicitacaoFerias, AvaliacaoDesempenho, CicloAvaliacao, PedidoColaborador } = require("../models");
+var { Colaborador, Ferias, SolicitacaoFerias, AvaliacaoDesempenho, CicloAvaliacao, PedidoColaborador, RegistoPresenca } = require("../models");
+var { Op } = require("sequelize");
 
 var getPortalStats = async function (req, res) {
   try {
@@ -81,6 +82,16 @@ var getPortalStats = async function (req, res) {
       where: { colaborador_id: colaborador.id, estado: "rejeitado" },
     });
 
+    var faltas = await RegistoPresenca.findAll({
+      where: {
+        colaborador_id: colaborador.id,
+        estado: { [Op.in]: ["Ausente", "Atrasado"] },
+      },
+      attributes: ["id", "data", "estado", "hora_entrada", "observacoes", "justificado"],
+      order: [["data", "DESC"]],
+      limit: 20,
+    });
+
     return res.status(200).json({
       dados: {
         ferias: {
@@ -99,6 +110,7 @@ var getPortalStats = async function (req, res) {
           rejeitados: rejeitadosCount,
         },
         pedidos_recentes: pedidos,
+        faltas: faltas,
       },
     });
   } catch (e) {

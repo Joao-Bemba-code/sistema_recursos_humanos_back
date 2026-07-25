@@ -129,8 +129,87 @@ var syncDatabase = async () => {
   try {
     await sequelize.authenticate();
     console.log(" conexao com BD estabelecida!");
-    await sequelize.sync({ alter: true });
-    console.log(" modelagem BD concluida!");
+    console.log(" a verificar colunas na BD...");
+
+    try {
+      var resultado = await sequelize.query("SHOW COLUMNS FROM `registos_presenca`");
+      var colunas = Array.isArray(resultado[0]) ? resultado[0] : resultado;
+      var nomesColunas = colunas.map(function(c) { return c.Field; });
+      if (nomesColunas.indexOf("justificado") === -1) {
+        await sequelize.query("ALTER TABLE `registos_presenca` ADD COLUMN `justificado` BOOLEAN NOT NULL DEFAULT false");
+        console.log(" Coluna 'justificado' adicionada!");
+      }
+      if (nomesColunas.indexOf("documento_justificacao") === -1) {
+        await sequelize.query("ALTER TABLE `registos_presenca` ADD COLUMN `documento_justificacao` VARCHAR(500) NULL");
+        console.log(" Coluna 'documento_justificacao' adicionada!");
+      }
+      if (nomesColunas.indexOf("justificacao_observacoes") === -1) {
+        await sequelize.query("ALTER TABLE `registos_presenca` ADD COLUMN `justificacao_observacoes` TEXT NULL");
+        console.log(" Coluna 'justificacao_observacoes' adicionada!");
+      }
+    } catch (alterErr) {
+      console.log(" Aviso: problema ao adicionar colunas de justificacao:", alterErr.message);
+    }
+
+    try {
+      var resultado2 = await sequelize.query("SHOW COLUMNS FROM `pagamentos`");
+      var colunas2 = Array.isArray(resultado2[0]) ? resultado2[0] : resultado2;
+      var nomes2 = colunas2.map(function(c) { return c.Field; });
+      if (nomes2.indexOf("desconto_faltas") === -1) {
+        await sequelize.query("ALTER TABLE `pagamentos` ADD COLUMN `desconto_faltas` DECIMAL(12,2) DEFAULT 0");
+        console.log(" Coluna 'desconto_faltas' adicionada!");
+      }
+      if (nomes2.indexOf("data_pagamento") === -1) {
+        await sequelize.query("ALTER TABLE `pagamentos` ADD COLUMN `data_pagamento` DATE NULL");
+        console.log(" Coluna 'data_pagamento' adicionada!");
+      }
+      if (nomes2.indexOf("recibo") === -1) {
+        await sequelize.query("ALTER TABLE `pagamentos` ADD COLUMN `recibo` VARCHAR(500) NULL");
+        console.log(" Coluna 'recibo' adicionada!");
+      }
+    } catch (alterErr2) {
+      console.log(" Aviso: problema ao adicionar colunas de pagamentos:", alterErr2.message);
+    }
+
+    try {
+      var resultado3 = await sequelize.query("SHOW COLUMNS FROM `organizacoes`");
+      var colunas3 = Array.isArray(resultado3[0]) ? resultado3[0] : resultado3;
+      var nomes3 = colunas3.map(function(c) { return c.Field; });
+      if (nomes3.indexOf("template_contrato") === -1) {
+        await sequelize.query("ALTER TABLE `organizacoes` ADD COLUMN `template_contrato` TEXT NULL");
+        console.log(" Coluna 'template_contrato' adicionada!");
+      }
+      if (nomes3.indexOf("logo_url") === -1) {
+        await sequelize.query("ALTER TABLE `organizacoes` ADD COLUMN `logo_url` VARCHAR(500) NULL");
+        console.log(" Coluna 'logo_url' adicionada!");
+      }
+    } catch (alterErr3) {
+      console.log(" Aviso: problema ao adicionar colunas de organizacoes:", alterErr3.message);
+    }
+
+    try {
+      var resultado4 = await sequelize.query("SHOW COLUMNS FROM `vencimentos`");
+      var colunas4 = Array.isArray(resultado4[0]) ? resultado4[0] : resultado4;
+      var nomes4 = colunas4.map(function(c) { return c.Field; });
+      if (nomes4.indexOf("colaborador_id") === -1) {
+        await sequelize.query("ALTER TABLE `vencimentos` ADD COLUMN `colaborador_id` VARCHAR(36) NULL");
+        console.log(" Coluna 'colaborador_id' adicionada a vencimentos!");
+      }
+    } catch (alterErr4) {
+      console.log(" Aviso: problema ao adicionar colunas de vencimentos:", alterErr4.message);
+    }
+
+    try {
+      var resultado5 = await sequelize.query("SHOW COLUMNS FROM `pedidos_colaborador`");
+      var colunas5 = Array.isArray(resultado5[0]) ? resultado5[0] : resultado5;
+      var nomes5 = colunas5.map(function(c) { return c.Field; });
+      if (nomes5.indexOf("documento") === -1) {
+        await sequelize.query("ALTER TABLE `pedidos_colaborador` ADD COLUMN `documento` VARCHAR(500) NULL");
+        console.log(" Coluna 'documento' adicionada a pedidos_colaborador!");
+      }
+    } catch (alterErr5) {
+      console.log(" Aviso: problema ao adicionar colunas de pedidos:", alterErr5.message);
+    }
   } catch (e) {
     console.log(" Erro ao sincronizar BD:", e.message);
     throw e;

@@ -118,13 +118,7 @@ var login = async function (req, res) {
       return res.status(401).json({ error: "Credenciais inválidas." + msgExtra });
     }
 
-    if (utilizador.bloqueado) {
-      await utilizador.update({ bloqueado: false, tentativas_login: 0 });
-    } else if (utilizador.tentativas_login > 0) {
-      await utilizador.update({ tentativas_login: 0 });
-    }
-
-    await utilizador.update({ ultimo_login: new Date() });
+    await utilizador.update({ ultimo_login: new Date(), tentativas_login: 0, bloqueado: false });
 
     var token = generateToken(utilizador);
     var refreshToken = generateRefreshToken(utilizador);
