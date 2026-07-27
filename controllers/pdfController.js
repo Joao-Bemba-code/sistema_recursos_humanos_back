@@ -1,7 +1,6 @@
 var PDFDocument = require("pdfkit");
 var path = require("path");
 var fs = require("fs");
-var os = require("os");
 var { Vencimento, Pagamento, Colaborador, Contrato, Organizacao } = require("../models");
 
 var MESES = ["Janeiro","Fevereiro","Marco","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -666,27 +665,11 @@ exports.fichaColaborador = async function (req, res) {
     if (colab.fotografia) {
       try {
         var photoPath = decodeHtmlEntities(colab.fotografia);
-        if (photoPath.startsWith("http")) {
-          var https = require("https");
-          var tempFile = path.join(os.tmpdir(), "sghr_photo_" + Date.now() + ".jpg");
-          await new Promise(function (resolve, reject) {
-            https.get(photoPath, function (response) {
-              var stream = fs.createWriteStream(tempFile);
-              response.pipe(stream);
-              stream.on("finish", function () { stream.close(); resolve(); });
-            }).on("error", reject);
-          });
-          if (fs.existsSync(tempFile)) {
-            doc.image(tempFile, pw - 130, y - 30, { fit: [75, 95] });
-            fs.unlinkSync(tempFile);
-          }
-        } else {
-          if (photoPath.startsWith("/uploads/")) {
-            photoPath = path.join(__dirname, "..", photoPath);
-          }
-          if (fs.existsSync(photoPath)) {
-            doc.image(photoPath, pw - 130, y - 30, { fit: [75, 95] });
-          }
+        if (photoPath.startsWith("/uploads/")) {
+          photoPath = path.join(__dirname, "..", photoPath);
+        }
+        if (fs.existsSync(photoPath)) {
+          doc.image(photoPath, pw - 130, y - 30, { fit: [75, 95] });
         }
       } catch (e) {}
     }
