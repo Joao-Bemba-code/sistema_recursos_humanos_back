@@ -334,4 +334,33 @@ var getStats = async function (req, res) {
   }
 };
 
-module.exports = { list, getById, create, updateEstado, getStats };
+var remove = async function (req, res) {
+  try {
+    var pedido = await PedidoColaborador.findOne({
+      where: {
+        id: req.params.id,
+        organizacao_id: req.utilizador.organizacao_id,
+      },
+    });
+
+    if (!pedido) {
+      return res.status(404).json({ error: "Pedido nao encontrado" });
+    }
+
+    if (pedido.documento) {
+      var caminho = path.join(__dirname, "..", pedido.documento);
+      if (fs.existsSync(caminho)) {
+        fs.unlinkSync(caminho);
+      }
+    }
+
+    await pedido.destroy();
+
+    return res.status(200).json({ mensagem: "Pedido eliminado com sucesso" });
+  } catch (e) {
+    console.log("Erro ao eliminar pedido:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+module.exports = { list, getById, create, updateEstado, getStats, remove };
