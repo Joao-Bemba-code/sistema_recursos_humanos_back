@@ -1,4 +1,6 @@
 var { Op } = require("sequelize");
+var path = require("path");
+var fs = require("fs");
 var { Colaborador, Departamento, Cargo, Utilizador } = require("../models");
 
 var list = async function (req, res) {
@@ -187,10 +189,25 @@ var remove = async function (req, res) {
       return res.status(404).json({ error: "Colaborador não encontrado" });
     }
 
-    await colaborador.update({ estado: "Desligado", data_desligamento: new Date() });
+    if (colaborador.fotografia) {
+      var caminhoFoto = path.join(__dirname, "..", colaborador.fotografia);
+      if (fs.existsSync(caminhoFoto)) {
+        fs.unlinkSync(caminhoFoto);
+      }
+    }
 
-    return res.status(200).json({ mensagem: "Colaborador desligado com sucesso" });
+    if (colaborador.curriculo) {
+      var caminhoCurriculo = path.join(__dirname, "..", colaborador.curriculo);
+      if (fs.existsSync(caminhoCurriculo)) {
+        fs.unlinkSync(caminhoCurriculo);
+      }
+    }
+
+    await colaborador.destroy();
+
+    return res.status(200).json({ mensagem: "Colaborador eliminado com sucesso" });
   } catch (e) {
+    console.log("Erro ao eliminar colaborador:", e.message);
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
 };
