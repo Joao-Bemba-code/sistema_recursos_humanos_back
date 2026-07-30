@@ -1,6 +1,4 @@
 var { Op } = require("sequelize");
-var path = require("path");
-var fs = require("fs");
 var { Colaborador, Departamento, Cargo, Utilizador } = require("../models");
 
 var list = async function (req, res) {
@@ -27,7 +25,11 @@ var list = async function (req, res) {
       ];
     }
 
-    if (estado) where.estado = estado;
+    if (estado) {
+      where.estado = estado;
+    } else {
+      where.estado = { [Op.ne]: "Desligado" };
+    }
     if (departamento_id) where.departamento_id = departamento_id;
     if (tipo) where.tipo_colaborador = tipo;
 
@@ -189,21 +191,12 @@ var remove = async function (req, res) {
       return res.status(404).json({ error: "Colaborador não encontrado" });
     }
 
-    if (colaborador.fotografia) {
-      var caminhoFoto = path.join(__dirname, "..", colaborador.fotografia);
-      if (fs.existsSync(caminhoFoto)) {
-        fs.unlinkSync(caminhoFoto);
-      }
+    try {
+      await colaborador.destroy();
+    } catch (destroyErr) {
+      console.log("Aviso: destroy falhou, a usar soft-delete:", destroyErr.message);
+      await colaborador.update({ estado: "Desligado", data_desligamento: new Date() });
     }
-
-    if (colaborador.curriculo) {
-      var caminhoCurriculo = path.join(__dirname, "..", colaborador.curriculo);
-      if (fs.existsSync(caminhoCurriculo)) {
-        fs.unlinkSync(caminhoCurriculo);
-      }
-    }
-
-    await colaborador.destroy();
 
     return res.status(200).json({ mensagem: "Colaborador eliminado com sucesso" });
   } catch (e) {
