@@ -92,6 +92,14 @@ var create = async function (req, res) {
     var dados = req.body;
     dados.organizacao_id = req.organizacao_id;
 
+    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes"];
+    var chaves = Object.keys(dados);
+    for (var i = 0; i < chaves.length; i++) {
+      if (dados[chaves[i]] === "" && camposOpcionais.indexOf(chaves[i]) !== -1) {
+        dados[chaves[i]] = null;
+      }
+    }
+
     if (!dados.numero_colaborador) {
       dados.numero_colaborador = await generateNumero(req.organizacao_id);
     }
@@ -121,6 +129,7 @@ var update = async function (req, res) {
     var camposProtegidos = ["id", "organizacao_id", "numero_colaborador", "createdAt", "updatedAt"];
     var camposEnum = ["genero", "estado_civil", "tipo_colaborador", "estado"];
     var camposData = ["data_nascimento", "bi_validade", "data_admissao", "data_desligamento"];
+    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes"];
     var dadosActualizar = {};
 
     var keys = Object.keys(req.body);
@@ -128,7 +137,7 @@ var update = async function (req, res) {
       if (camposProtegidos.indexOf(keys[i]) !== -1) continue;
       var valor = req.body[keys[i]];
       if (valor === "" && camposEnum.indexOf(keys[i]) !== -1) continue;
-      if (valor === "" && camposData.indexOf(keys[i]) !== -1) { dadosActualizar[keys[i]] = null; continue; }
+      if (valor === "" && camposOpcionais.indexOf(keys[i]) !== -1) { dadosActualizar[keys[i]] = null; continue; }
       if (valor === undefined) continue;
       dadosActualizar[keys[i]] = valor;
     }

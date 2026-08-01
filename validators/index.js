@@ -33,23 +33,23 @@ var authValidation = [
 ];
 
 var collaboratorValidation = [
-  body("nome_completo")
-    .notEmpty().withMessage("Nome completo é obrigatório")
-    .isLength({ min: 3, max: 200 }).withMessage("Nome deve ter entre 3 e 200 caracteres")
-    .trim()
-    .escape(),
   body("data_admissao")
     .notEmpty().withMessage("Data de admissão é obrigatória")
     .isISO8601().withMessage("Data de admissão inválida"),
+  body("nome_completo")
+    .optional({ checkFalsy: true })
+    .isLength({ min: 3, max: 200 }).withMessage("Nome deve ter entre 3 e 200 caracteres")
+    .trim()
+    .escape(),
   body("email_pessoal")
-    .optional()
+    .optional({ checkFalsy: true })
     .isEmail().withMessage("Email pessoal inválido")
     .normalizeEmail(),
   body("nif")
-    .optional()
+    .optional({ checkFalsy: true })
     .isLength({ min: 9, max: 20 }).withMessage("NIF inválido"),
   body("telefone")
-    .optional()
+    .optional({ checkFalsy: true })
     .isLength({ min: 9, max: 20 }).withMessage("Telefone inválido"),
   handleErrors,
 ];

@@ -210,6 +210,18 @@ var syncDatabase = async () => {
     } catch (alterErr5) {
       console.log(" Aviso: problema ao adicionar colunas de pedidos:", alterErr5.message);
     }
+
+    try {
+      var resultado6 = await sequelize.query("SHOW COLUMNS FROM `colaboradores`");
+      var colunas6 = Array.isArray(resultado6[0]) ? resultado6[0] : resultado6;
+      var nomes6 = colunas6.map(function(c) { return c.Field; });
+      if (nomes6.indexOf("nome_completo") !== -1) {
+        await sequelize.query("ALTER TABLE `colaboradores` MODIFY COLUMN `nome_completo` VARCHAR(200) NULL");
+        console.log(" Coluna 'nome_completo' alterada para NULL!");
+      }
+    } catch (alterErr6) {
+      console.log(" Aviso: problema ao tornar nome_completo nullable:", alterErr6.message);
+    }
   } catch (e) {
     console.log(" Erro ao sincronizar BD:", e.message);
     throw e;

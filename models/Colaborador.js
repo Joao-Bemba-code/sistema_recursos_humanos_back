@@ -14,7 +14,7 @@ var Colaborador = sequelize.define("Colaborador", {
   },
   nome_completo: {
     type: DataTypes.STRING(200),
-    allowNull: false,
+    allowNull: true,
   },
   nome_curto: {
     type: DataTypes.STRING(100),
