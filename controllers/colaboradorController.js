@@ -81,7 +81,7 @@ var getById = async function (req, res) {
 
 var generateNumero = async function (organizacao_id) {
   var maxColab = await Colaborador.findOne({
-    where: { organizacao_id: organizacao_id, estado: { [Op.ne]: "Desligado" } },
+    where: { organizacao_id: organizacao_id },
     attributes: ["numero_colaborador"],
     order: [["numero_colaborador", "DESC"]],
   });
