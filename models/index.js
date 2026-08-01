@@ -222,6 +222,17 @@ var syncDatabase = async () => {
     } catch (alterErr6) {
       console.log(" Aviso: problema ao tornar nome_completo nullable:", alterErr6.message);
     }
+    try {
+      var resultado7 = await sequelize.query("SHOW COLUMNS FROM `contratos`");
+      var colunas7 = Array.isArray(resultado7[0]) ? resultado7[0] : resultado7;
+      var nomes7 = colunas7.map(function(c) { return c.Field; });
+      if (nomes7.indexOf("subsidio_alimentacao") === -1) {
+        await sequelize.query("ALTER TABLE `contratos` ADD COLUMN `subsidio_alimentacao` DECIMAL(12,2) NULL");
+        console.log(" Coluna 'subsidio_alimentacao' adicionada a contratos!");
+      }
+    } catch (alterErr7) {
+      console.log(" Aviso: problema ao adicionar colunas de contratos:", alterErr7.message);
+    }
   } catch (e) {
     console.log(" Erro ao sincronizar BD:", e.message);
     throw e;

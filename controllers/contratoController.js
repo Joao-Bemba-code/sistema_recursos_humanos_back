@@ -52,7 +52,7 @@ exports.obter = async (req, res, next) => {
   }
 };
 
-var camposOpcionaisContrato = ["colaborador_id", "numero", "data_fim", "data_assinatura", "periodo_experimentacao", "funcao", "local_trabalho", "horario_trabalho", "motivo_rescisao", "data_rescisao", "observacoes", "documento"];
+var camposOpcionaisContrato = ["colaborador_id", "numero", "data_fim", "data_assinatura", "periodo_experimentacao", "funcao", "local_trabalho", "horario_trabalho", "motivo_rescisao", "data_rescisao", "observacoes", "documento", "subsidio_alimentacao"];
 var camposEnumContrato = ["tipo", "estado"];
 
 exports.criar = async (req, res, next) => {

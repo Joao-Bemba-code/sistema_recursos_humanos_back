@@ -98,6 +98,20 @@ function decodeHtmlEntities(str) {
   return result;
 }
 
+function htmlToParagraphs(str) {
+  if (!str) return "";
+  var result = str;
+  result = result.replace(/<br\s*\/?\s*>/gi, "\n");
+  result = result.replace(/<\/p>/gi, "\n\n");
+  result = result.replace(/<\/div>/gi, "\n\n");
+  result = result.replace(/<\/li>/gi, "\n");
+  result = result.replace(/<\/(h[1-6]|section|article)>/gi, "\n\n");
+  result = result.replace(/<(p|div|ul|ol|li|h[1-6]|section|article)\b[^>]*>/gi, "");
+  result = result.replace(/\n{3,}/g, "\n\n");
+  result = result.replace(/[ \t]+\n/g, "\n");
+  return result;
+}
+
 function stripHtmlTags(str) {
   if (!str) return "";
   return str.replace(/<[^>]*>/g, "").trim();
@@ -140,6 +154,7 @@ function cleanGarbledFragments(str) {
 function normalizeForPdf(str) {
   if (!str) return "";
   var result = decodeHtmlEntities(str);
+  result = htmlToParagraphs(result);
   result = stripHtmlTags(result);
   result = stripGarbageChars(result);
   result = cleanGarbledFragments(result);
@@ -414,6 +429,7 @@ exports.contrato = async function (req, res) {
         "LOCAL_TRABALHO": contrato.local_trabalho || "",
         "HORARIO_TRABALHO": contrato.horario_trabalho || "",
         "SALARIO_BASE": contrato.salario_base ? fmt(contrato.salario_base) + " " + contrato.moeda : "",
+        "SUBSIDIO_ALIMENTACAO": contrato.subsidio_alimentacao ? fmt(contrato.subsidio_alimentacao) + " " + (contrato.moeda || "AOA") : "",
         "PERIODO_EXPERIMENTACAO": contrato.periodo_experimentacao ? contrato.periodo_experimentacao + " dias" : "",
         "NOME_ORGANIZACAO": org ? org.nome : "",
         "NIF_ORGANIZACAO": org ? (org.nif || "") : "",
@@ -436,7 +452,7 @@ exports.contrato = async function (req, res) {
         }
         var linha = linhas[t];
         if (linha.trim() === "") {
-          y += 8;
+          y += 6;
           continue;
         }
 
@@ -445,12 +461,13 @@ exports.contrato = async function (req, res) {
         if (isTitle) {
           y += 4;
           doc.font("Helvetica-Bold").fontSize(10).fillColor("#333333");
-          doc.text(linha.trim(), ml, y, { width: w });
-          y = doc.y + 6;
+          doc.text(linha.trim(), ml, y, { width: w, lineGap: 2 });
+          y = doc.y + 7;
           doc.font("Helvetica").fontSize(9).fillColor("#333333");
         } else {
+          doc.font("Helvetica").fontSize(9).fillColor("#333333");
           doc.text(linha, ml, y, { width: w, align: "justify", lineGap: 2 });
-          y = doc.y + 3;
+          y = doc.y + 4;
         }
       }
 
@@ -568,7 +585,8 @@ exports.contrato = async function (req, res) {
         "O trabalhador obriga-se a prestar " + (contrato.horario_trabalho || "40 horas semanais") + " de trabalho, com intervalo para refeicao.");
 
       drawClausula("CLÁUSULA QUINTA - Retribuicao",
-        "A Entidade Empregadora compromete-se a pagar ao trabalhador a retribuicao mensal de " + fmt(contrato.salario_base) + " " + contrato.moeda + ", sujeita aos descontos legais e paga 12 meses por ano, acrescida de duodecimos de subsidio de natal e de ferias calculados nos termos da lei.");
+        "A Entidade Empregadora compromete-se a pagar ao trabalhador a retribuicao mensal de " + fmt(contrato.salario_base) + " " + contrato.moeda + ", sujeita aos descontos legais e paga 12 meses por ano, acrescida de duodecimos de subsidio de natal e de ferias calculados nos termos da lei." +
+        (contrato.subsidio_alimentacao ? " O trabalhador tera ainda direito ao valor de " + fmt(contrato.subsidio_alimentacao) + " " + contrato.moeda + " referente ao subsidio de alimentacao por cada dia de trabalho efectivo, nao sendo este valor considerado para efeitos de calculo dos duodecimos previstos no numero anterior." : ""));
 
       drawClausula("CLÁUSULA SEXTA - Deveres do Trabalhador",
         "O trabalhador obriga-se a: a) Comparecer ao servico com assiduidade; b) Cumprir pontualmente o horario de trabalho; c) Guardar sigilo absoluto em todos os assuntos da Entidade Empregadora; d) Guardar lealdade a Entidade Empregadora.");

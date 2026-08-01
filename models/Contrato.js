@@ -36,6 +36,10 @@ var Contrato = sequelize.define("Contrato", {
     type: DataTypes.DECIMAL(12, 2),
     allowNull: false,
   },
+  subsidio_alimentacao: {
+    type: DataTypes.DECIMAL(12, 2),
+    allowNull: true,
+  },
   moeda: {
     type: DataTypes.STRING(3),
     defaultValue: "AOA",
