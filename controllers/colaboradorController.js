@@ -1,5 +1,5 @@
 var { Op } = require("sequelize");
-var { Colaborador, Departamento, Cargo, Utilizador } = require("../models");
+var { Colaborador, Departamento, Cargo, Utilizador, Contrato, Ferias, SolicitacaoFerias, Licenca, RegistoPresenca, AvaliacaoDesempenho, InscricaoFormacao, OcorrenciaDisciplinar, Vencimento, Pagamento, PedidoColaborador } = require("../models");
 
 var list = async function (req, res) {
   try {
@@ -200,12 +200,23 @@ var remove = async function (req, res) {
       return res.status(404).json({ error: "Colaborador não encontrado" });
     }
 
-    try {
-      await colaborador.destroy();
-    } catch (destroyErr) {
-      console.log("Aviso: destroy falhou, a usar soft-delete:", destroyErr.message);
-      await colaborador.update({ estado: "Desligado", data_desligamento: new Date() });
+    var modelosDependentes = [
+      Contrato, Ferias, SolicitacaoFerias, Licenca, RegistoPresenca,
+      AvaliacaoDesempenho, InscricaoFormacao, OcorrenciaDisciplinar,
+      Vencimento, Pagamento, PedidoColaborador,
+    ];
+
+    for (var i = 0; i < modelosDependentes.length; i++) {
+      var Modelo = modelosDependentes[i];
+      if (!Modelo) continue;
+      try {
+        await Modelo.destroy({ where: { colaborador_id: colaborador.id } });
+      } catch (depErr) {
+        console.log("Aviso: nao foi possivel apagar registos de " + Modelo.name + ":", depErr.message);
+      }
     }
+
+    await colaborador.destroy();
 
     return res.status(200).json({ mensagem: "Colaborador eliminado com sucesso" });
   } catch (e) {
