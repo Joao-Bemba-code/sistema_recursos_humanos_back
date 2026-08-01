@@ -444,31 +444,54 @@ exports.contrato = async function (req, res) {
       // Draw template text line by line
       var linhas = templateTexto.split("\n");
       doc.font("Helvetica").fontSize(9).fillColor("#333333");
+      var aguardarNomeClausula = false;
 
       for (var t = 0; t < linhas.length; t++) {
         if (y > 720) {
           doc.addPage();
           y = 50;
         }
-        var linha = linhas[t];
-        if (linha.trim() === "") {
-          y += 6;
+        var linha = (linhas[t] || "").trim();
+        if (linha === "") {
+          aguardarNomeClausula = false;
+          y += 5;
           continue;
         }
 
         // Check if line is a section title (starts with CLAUSULA or similar uppercase)
         var isTitle = linha.match(/^(CLAUSULA|CLÁUSULA|ARTIGO|SECCAO|SECÇÃO|TITULO|CAPITULO|CAPÍTULO)/i);
         if (isTitle) {
-          y += 4;
+          y += 6;
           doc.font("Helvetica-Bold").fontSize(10).fillColor("#333333");
-          doc.text(linha.trim(), ml, y, { width: w, lineGap: 2 });
-          y = doc.y + 7;
+          doc.text(linha, ml, y, { width: w });
+          y = doc.y + 5;
           doc.font("Helvetica").fontSize(9).fillColor("#333333");
-        } else {
-          doc.font("Helvetica").fontSize(9).fillColor("#333333");
-          doc.text(linha, ml, y, { width: w, align: "justify", lineGap: 2 });
-          y = doc.y + 4;
+          aguardarNomeClausula = true;
+          continue;
         }
+
+        // Next line after a clause title is the clause name -> bold subtitle
+        if (aguardarNomeClausula) {
+          aguardarNomeClausula = false;
+          doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#444444");
+          doc.text(linha, ml, y, { width: w });
+          y = doc.y + 4;
+          doc.font("Helvetica").fontSize(9).fillColor("#333333");
+          continue;
+        }
+
+        // List items: "1. ...", "2. ..." or "a) ...", "b) ..."
+        var isLista = linha.match(/^(\d+\.\s|[a-z]\)\s)/i);
+        if (isLista) {
+          doc.text(linha, ml, y, { width: w, align: "left", indent: 16, hangingIndent: 16, lineGap: 2 });
+          y = doc.y + 4;
+          continue;
+        }
+
+        // Normal paragraph with first-line indent
+        doc.font("Helvetica").fontSize(9).fillColor("#333333");
+        doc.text(linha, ml, y, { width: w, align: "justify", indent: 18, lineGap: 2 });
+        y = doc.y + 5;
       }
 
       // Assinaturas no final do template
