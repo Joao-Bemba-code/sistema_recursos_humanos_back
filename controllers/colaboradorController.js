@@ -80,10 +80,17 @@ var getById = async function (req, res) {
 };
 
 var generateNumero = async function (organizacao_id) {
-  var count = await Colaborador.count({
-    where: { organizacao_id: organizacao_id },
+  var maxColab = await Colaborador.findOne({
+    where: { organizacao_id: organizacao_id, estado: { [Op.ne]: "Desligado" } },
+    attributes: ["numero_colaborador"],
+    order: [["numero_colaborador", "DESC"]],
   });
-  var num = count + 1;
+  var ultimo = 0;
+  if (maxColab && maxColab.numero_colaborador) {
+    var match = String(maxColab.numero_colaborador).match(/(\d+)$/);
+    if (match) ultimo = parseInt(match[1], 10);
+  }
+  var num = ultimo + 1;
   return "COL-" + String(num).padStart(5, "0");
 };
 
