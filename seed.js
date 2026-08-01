@@ -1,4 +1,4 @@
-var { Organizacao, Perfil, Utilizador, Colaborador, Notificacao, PedidoColaborador, syncDatabase, sequelize } = require("./models");
+var { Organizacao, Perfil, Utilizador, Colaborador, Notificacao, syncDatabase, sequelize } = require("./models");
 
 var perfisPadrao = [
   {
@@ -274,51 +274,6 @@ var seed = async function () {
       }
     } catch (e) {
       console.log(" Aviso: Nao foi possivel criar notificacoes:", e.message);
-    }
-
-    // Pedidos de exemplo (try/catch separado)
-    try {
-      var colaboradorLink = await Colaborador.findOne({ where: { organizacao_id: org.id } });
-      if (colaboradorLink && admin) {
-        var pedidoExiste = await PedidoColaborador.findOne({ where: { organizacao_id: org.id } });
-        if (!pedidoExiste) {
-          await PedidoColaborador.bulkCreate([
-            {
-              organizacao_id: org.id,
-              colaborador_id: colaboradorLink.id,
-              tipo: "ferias",
-              titulo: "Pedido de Ferias - Fim de Ano",
-              descricao: "Solicito aprovacao para gozo de ferias anuais de 15 dias.",
-              estado: "pendente",
-              dados: { data_inicio: "2026-12-20", data_fim: "2027-01-04", dias: 15 },
-            },
-            {
-              organizacao_id: org.id,
-              colaborador_id: colaboradorLink.id,
-              tipo: "adiantamento",
-              titulo: "Adiantamento Salarial",
-              descricao: "Solicito adiantamento de salario referente ao mes corrente.",
-              estado: "pendente",
-              dados: { valor: 50000, motivo: "Despesas medicas" },
-            },
-            {
-              organizacao_id: org.id,
-              colaborador_id: colaboradorLink.id,
-              tipo: "justificacao",
-              titulo: "Justificacao de Falta",
-              descricao: "Justifico ausencia do dia 10/07/2026 por motivo de saude.",
-              estado: "aprovado",
-              responded_by: admin.id,
-              responded_at: new Date(),
-              comentario: "Aprovado. Apresentar atestado medico.",
-              dados: { data_ausencia: "2026-07-10", motivo: "Consulta medica" },
-            },
-          ]);
-          console.log(" Pedidos de exemplo criados!");
-        }
-      }
-    } catch (e) {
-      console.log(" Aviso: Nao foi possivel criar pedidos:", e.message);
     }
   } catch (e) {
     console.log(" Erro no seed:", e.message);

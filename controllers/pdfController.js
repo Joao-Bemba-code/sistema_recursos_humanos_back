@@ -195,11 +195,6 @@ exports.folhaSalarial = async function (req, res) {
       return res.status(404).json({ error: "Pagamento nao encontrado" });
     }
 
-    var vencimento = await Vencimento.findOne({
-      where: { colaborador_id: pagamento.colaborador_id, estado: "Activo" },
-      order: [["data_inicio", "DESC"]],
-    });
-
     var colab = pagamento.colaborador;
     var org = await getOrganizacao(colab);
 
@@ -211,132 +206,127 @@ exports.folhaSalarial = async function (req, res) {
     var ml = 40;
     var w = doc.page.width - 80;
     var pw = doc.page.width;
-    var y = 50;
-    var logoHeight = 0;
+    var col1 = 50;
+    var colV = pw - 60;
+    var valW = 200;
+    var rowH = 18;
+    var y = 42;
 
     if (org && org.logo_url) {
       try {
         var logoPath = org.logo_url;
         if (logoPath.startsWith("/uploads/")) { logoPath = path.join(__dirname, "..", logoPath); }
         if (fs.existsSync(logoPath)) {
-          doc.image(logoPath, pw / 2 - 40, y, { fit: [80, 80] });
-          logoHeight = 90;
+          doc.image(logoPath, pw / 2 - 35, y, { fit: [70, 70] });
+          y += 78;
         }
       } catch (e) {}
     }
 
-    y += logoHeight;
-
     if (org && org.nome) {
-      doc.font("Helvetica-Bold").fontSize(14).fillColor("#000000");
+      doc.font("Helvetica-Bold").fontSize(16).fillColor("#000000");
       doc.text(normalizeForPdf(org.nome), ml, y, { align: "center", width: w });
-      y += 20;
+      y += 24;
     }
 
-    doc.font("Helvetica-Bold").fontSize(13).fillColor("#000000");
+    doc.font("Helvetica-Bold").fontSize(14).fillColor("#1a1a1a");
     doc.text("Recibo de Vencimento", ml, y, { align: "center", width: w });
-    y += 20;
+    y += 22;
 
-    doc.font("Helvetica").fontSize(9).fillColor("#555555");
+    doc.font("Helvetica").fontSize(10).fillColor("#666666");
     doc.text("Mes de " + MESES[pagamento.mes - 1] + " de " + pagamento.ano, ml, y, { align: "center", width: w });
-    y += 20;
+    y += 18;
 
-    y += 15;
+    y += 8;
+
+    function reciboRow(label, value) {
+      doc.font("Helvetica").fontSize(10).fillColor("#000000");
+      doc.text(label, col1, y);
+      doc.text(value, colV - valW, y, { align: "right", width: valW });
+      y += rowH;
+    }
+
+    function reciboTotalRow(label, value) {
+      doc.font("Helvetica-Bold").fontSize(11).fillColor("#333333");
+      doc.text(label, col1, y);
+      doc.text(value, colV - valW, y, { align: "right", width: valW });
+      y += rowH + 6;
+    }
 
     if (colab) {
-      doc.fontSize(11).font("Helvetica-Bold").text("Dados do Colaborador", 40, y);
-      y += 18;
-      doc.fontSize(9).font("Helvetica");
-      doc.text("Nome: " + normalizeForPdf(colab.nome_completo), 40, y); y += 14;
-      doc.text("N. Colaborador: " + normalizeForPdf(colab.numero_colaborador), 40, y); y += 14;
-      if (colab.nif) { doc.text("NIF: " + normalizeForPdf(colab.nif), 40, y); y += 14; }
-      if (colab.numero_seguranca_social) { doc.text("N. Seguranca Social: " + normalizeForPdf(colab.numero_seguranca_social), 40, y); y += 14; }
-      if (colab.conta_bancaria) { doc.text("Conta Bancaria: " + normalizeForPdf(colab.conta_bancaria), 40, y); y += 14; }
-      y += 6;
+      doc.font("Helvetica-Bold").fontSize(12).fillColor("#000000");
+      doc.text("Dados do Colaborador", ml, y);
+      y += 16;
+      doc.font("Helvetica").fontSize(10).fillColor("#333333");
+      doc.text("Nome: " + normalizeForPdf(colab.nome_completo), ml, y); y += 15;
+      doc.text("N. Colaborador: " + normalizeForPdf(colab.numero_colaborador), ml, y); y += 15;
+      if (colab.nif) { doc.text("NIF: " + normalizeForPdf(colab.nif), ml, y); y += 15; }
+      if (colab.numero_seguranca_social) { doc.text("N. Seguranca Social: " + normalizeForPdf(colab.numero_seguranca_social), ml, y); y += 15; }
+      if (colab.conta_bancaria) { doc.text("Conta Bancaria: " + normalizeForPdf(colab.conta_bancaria), ml, y); y += 15; }
+      y += 8;
     }
 
-    y += 12;
+    y += 8;
 
-    doc.fontSize(11).font("Helvetica-Bold").text("Detalhes do Vencimento", 40, y);
-    y += 20;
-
-    var col1 = 50;
-    var col2 = 200;
-    var rowH = 16;
-
-    doc.fontSize(9).font("Helvetica-Bold").fillColor("#333333");
-    doc.text("Descricao", col1, y);
-    doc.text("Valores", col2, y);
+    doc.font("Helvetica-Bold").fontSize(12).fillColor("#000000");
+    doc.text("Detalhes do Vencimento", ml, y);
     y += 16;
-    y += 4;
+
+    doc.font("Helvetica-Bold").fontSize(10).fillColor("#333333");
+    doc.text("Descricao", col1, y);
+    doc.text("Valores", colV - valW, y, { align: "right", width: valW });
+    y += rowH;
     doc.fillColor("#000000").font("Helvetica");
 
     doc.font("Helvetica-Bold").fillColor("#333333").text("VENCIMENTOS", col1, y); y += rowH;
-    doc.font("Helvetica").fillColor("#000000");
 
-    var rows = [
-      ["Salario Base", pagamento.salario_base],
-      ["Subsidio de Alimentacao", vencimento ? vencimento.subsidio_alimentacao : 0],
-      ["Subsidio de Transporte", vencimento ? vencimento.subsidio_transporte : 0],
-      ["Subsidio de Educacao", vencimento ? vencimento.subsidio_educacao : 0],
-      ["Outros Subsidios", vencimento ? vencimento.outros_subsidios : 0],
-      ["Horas Extras", pagamento.horas_extras],
+    var totalVencimentos = (parseFloat(pagamento.salario_base) || 0) + (parseFloat(pagamento.subsidios) || 0) + (parseFloat(pagamento.horas_extras) || 0);
+
+    var vals = [
+      ["  Salario Base", pagamento.salario_base],
+      ["  Subsidios", pagamento.subsidios],
+      ["  Horas Extras", pagamento.horas_extras],
     ];
 
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i];
-      var val = parseFloat(r[1]) || 0;
-      if (val > 0) {
-        doc.text("  " + r[0], col1, y);
-        doc.text(fmt(r[1]) + " Kz", col2, y);
-        y += rowH;
-      }
+    for (var i = 0; i < vals.length; i++) {
+      var v = parseFloat(vals[i][1]) || 0;
+      if (v > 0) { reciboRow(vals[i][0], fmt(v) + " Kz"); }
     }
     y += 4;
-
-    doc.font("Helvetica-Bold").fillColor("#333333");
-    doc.text("Total Vencimentos", col1, y);
-    doc.text(fmt(pagamento.salario_base) + " Kz", col2, y);
-    y += rowH + 12;
+    reciboTotalRow("Total Vencimentos", fmt(totalVencimentos) + " Kz");
 
     doc.font("Helvetica-Bold").fillColor("#333333").text("DESCONTOS", col1, y); y += rowH;
-    doc.font("Helvetica").fillColor("#000000");
 
     var descontos = [
-      ["IRT", pagamento.irt],
-      ["Seguranca Social", pagamento.seguranca_social],
-      ["Outros Descontos", pagamento.descontos],
-      ["Desconto Faltas", pagamento.desconto_faltas],
+      ["  IRT", pagamento.irt],
+      ["  Seguranca Social", pagamento.seguranca_social],
+      ["  Outros Descontos", pagamento.descontos],
+      ["  Desconto Faltas", pagamento.desconto_faltas],
     ];
 
     for (var j = 0; j < descontos.length; j++) {
-      var d = descontos[j];
-      var dval = parseFloat(d[1]) || 0;
-      if (dval > 0) {
-        doc.text("  " + d[0], col1, y);
-        doc.text("- " + fmt(d[1]) + " Kz", col2, y);
-        y += rowH;
-      }
+      var dv = parseFloat(descontos[j][1]) || 0;
+      if (dv > 0) { reciboRow(descontos[j][0], "- " + fmt(dv) + " Kz"); }
     }
     y += 4;
 
     var totalDescontos = (parseFloat(pagamento.irt) || 0) + (parseFloat(pagamento.seguranca_social) || 0) + (parseFloat(pagamento.descontos) || 0) + (parseFloat(pagamento.desconto_faltas) || 0);
-    doc.font("Helvetica-Bold").fillColor("#333333");
-    doc.text("Total Descontos", col1, y);
-    doc.text("- " + fmt(totalDescontos) + " Kz", col2, y);
-    y += rowH + 14;
+    reciboTotalRow("Total Descontos", "- " + fmt(totalDescontos) + " Kz");
 
-    doc.fontSize(12).font("Helvetica-Bold").fillColor("#333333");
-    doc.text("TOTAL LIQUIDO A RECEBER", col1, y);
-    doc.text(fmt(pagamento.total_liquido) + " Kz", col2, y);
-    y += 38;
+    y += 4;
+    var ly = y;
+    doc.rect(40, ly - 6, pw - 80, 24).fill("#eef2f7");
+    doc.fillColor("#111111").font("Helvetica-Bold").fontSize(13);
+    doc.text("TOTAL LIQUIDO A RECEBER", col1, ly);
+    doc.text(fmt(pagamento.total_liquido) + " Kz", colV - valW, ly, { align: "right", width: valW });
+    y = ly + 24;
 
     doc.fontSize(9).font("Helvetica").fillColor("#666666");
-    doc.text("Estado: " + pagamento.estado, 40, y); y += 14;
+    doc.text("Estado: " + pagamento.estado, ml, y); y += 15;
     if (pagamento.data_pagamento) {
-      doc.text("Data de Pagamento: " + fmtDate(pagamento.data_pagamento), 40, y); y += 14;
+      doc.text("Data de Pagamento: " + fmtDate(pagamento.data_pagamento), ml, y); y += 15;
     }
-    doc.text("Periodo: " + MESES[pagamento.mes - 1] + " / " + pagamento.ano, 40, y); y += 20;
+    doc.text("Periodo: " + MESES[pagamento.mes - 1] + " / " + pagamento.ano, ml, y); y += 20;
 
     drawFooter(doc, org);
     doc.end();
