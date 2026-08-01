@@ -1,6 +1,53 @@
 var { Op } = require("sequelize");
 var { sequelize, Vencimento, Pagamento, Colaborador, RegistoPresenca } = require("../models");
 
+// ==================== IMPOSTOS ANGOLA (IRT 2026 / INSS) ====================
+
+var TAXA_SEGURANCA_SOCIAL = 0.03;
+var ISENCAO_SUBSIDIO_ALIMENTACAO = 30000;
+var TABELA_IRT = [
+  { ate: 150000, parcela: 0, taxa: 0 },
+  { ate: 200000, parcela: 12500, taxa: 0.16 },
+  { ate: 300000, parcela: 31250, taxa: 0.18 },
+  { ate: 500000, parcela: 49250, taxa: 0.19 },
+  { ate: 1000000, parcela: 87250, taxa: 0.20 },
+  { ate: 1500000, parcela: 187250, taxa: 0.21 },
+  { ate: 2000000, parcela: 292250, taxa: 0.22 },
+  { ate: 2500000, parcela: 402250, taxa: 0.23 },
+  { ate: 5000000, parcela: 517250, taxa: 0.24 },
+  { ate: 10000000, parcela: 1117250, taxa: 0.245 },
+  { ate: Infinity, parcela: 2342250, taxa: 0.25 },
+];
+
+var arredondar = function (v) { return Math.round(v * 100) / 100; };
+
+var calcularSegurancaSocial = function (bruto) {
+  return arredondar(bruto * TAXA_SEGURANCA_SOCIAL);
+};
+
+var calcularIRT = function (base) {
+  if (base <= 0) return 0;
+  for (var i = 0; i < TABELA_IRT.length; i++) {
+    if (base <= TABELA_IRT[i].ate) {
+      var limiteInferior = i === 0 ? 0 : TABELA_IRT[i - 1].ate;
+      return arredondar(TABELA_IRT[i].parcela + (base - limiteInferior) * TABELA_IRT[i].taxa);
+    }
+  }
+  return 0;
+};
+
+var calcularDescontosObrigatorios = function (salarioBase, subsidios, horasExtras) {
+  var sb = parseFloat(salarioBase) || 0;
+  var sub = parseFloat(subsidios) || 0;
+  var he = parseFloat(horasExtras) || 0;
+  var bruto = sb + sub + he;
+  var ss = calcularSegurancaSocial(bruto);
+  var subsidiosTributaveis = Math.max(0, sub - ISENCAO_SUBSIDIO_ALIMENTACAO);
+  var baseIRT = sb + he + subsidiosTributaveis - ss;
+  if (baseIRT < 0) baseIRT = 0;
+  return { seguranca_social: ss, irt: calcularIRT(baseIRT), bruto: bruto };
+};
+
 // ==================== VENCIMENTOS ====================
 
 var listVencimentos = async function (req, res) {
@@ -145,13 +192,13 @@ var getContratoActual = async function (req, res) {
     var { colaborador_id } = req.params;
     console.log("DEBUG buscar contrato para:", colaborador_id);
     var contrato = await sequelize.query(
-      "SELECT salario_base FROM contratos WHERE colaborador_id = ? AND estado = 'Activo' ORDER BY createdAt DESC LIMIT 1",
+      "SELECT salario_base, subsidio_alimentacao FROM contratos WHERE colaborador_id = ? AND estado = 'Activo' ORDER BY createdAt DESC LIMIT 1",
       { replacements: [colaborador_id], type: sequelize.QueryTypes.SELECT }
     );
     console.log("DEBUG contrato activo:", JSON.stringify(contrato));
     if (!contrato || contrato.length === 0) {
       contrato = await sequelize.query(
-        "SELECT salario_base FROM contratos WHERE colaborador_id = ? ORDER BY createdAt DESC LIMIT 1",
+        "SELECT salario_base, subsidio_alimentacao FROM contratos WHERE colaborador_id = ? ORDER BY createdAt DESC LIMIT 1",
         { replacements: [colaborador_id], type: sequelize.QueryTypes.SELECT }
       );
       console.log("DEBUG contrato fallback:", JSON.stringify(contrato));
@@ -320,14 +367,21 @@ var createPagamento = async function (req, res) {
       return res.status(409).json({ error: "Ja existe pagamento registado para este colaborador neste mes/ano" });
     }
 
-    if (!dados.salario_base) {
+    if (!dados.salario_base || dados.subsidios === undefined || dados.subsidios === "") {
       var contrato = await sequelize.query(
-        "SELECT salario_base FROM contratos WHERE colaborador_id = ? AND estado = 'Activo' ORDER BY createdAt DESC LIMIT 1",
+        "SELECT salario_base, subsidio_alimentacao FROM contratos WHERE colaborador_id = ? AND estado = 'Activo' ORDER BY createdAt DESC LIMIT 1",
         { replacements: [dados.colaborador_id], type: sequelize.QueryTypes.SELECT }
       );
+      if (!contrato || contrato.length === 0) {
+        contrato = await sequelize.query(
+          "SELECT salario_base, subsidio_alimentacao FROM contratos WHERE colaborador_id = ? ORDER BY createdAt DESC LIMIT 1",
+          { replacements: [dados.colaborador_id], type: sequelize.QueryTypes.SELECT }
+        );
+      }
       if (contrato && contrato.length > 0) {
-        dados.salario_base = contrato[0].salario_base;
-      } else {
+        if (!dados.salario_base) dados.salario_base = contrato[0].salario_base;
+        if (dados.subsidios === undefined || dados.subsidios === "") dados.subsidios = contrato[0].subsidio_alimentacao || 0;
+      } else if (!dados.salario_base) {
         return res.status(400).json({ error: "Colaborador nao possui contrato activo com salario definido" });
       }
     }
@@ -337,8 +391,10 @@ var createPagamento = async function (req, res) {
     dados.subsidios = toNum(dados.subsidios);
     dados.horas_extras = toNum(dados.horas_extras);
     dados.descontos = toNum(dados.descontos);
-    dados.irt = toNum(dados.irt);
-    dados.seguranca_social = toNum(dados.seguranca_social);
+
+    var obrigatorios = calcularDescontosObrigatorios(dados.salario_base, dados.subsidios, dados.horas_extras);
+    dados.seguranca_social = obrigatorios.seguranca_social;
+    dados.irt = obrigatorios.irt;
 
     var descontoFaltas = await calcularDescontoFaltas(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano));
     dados.desconto_faltas = descontoFaltas;
