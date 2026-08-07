@@ -5,6 +5,7 @@ var Perfil = require("./Perfil");
 var Utilizador = require("./Utilizador");
 var Colaborador = require("./Colaborador");
 var { Departamento, Cargo } = require("./Estrutura");
+var Seccao = require("./Seccao");
 var Contrato = require("./Contrato");
 var { Ferias, SolicitacaoFerias, Licenca } = require("./FeriasLicencas");
 var { RegistoPresenca, Turno } = require("./Assiduidade");
@@ -36,6 +37,14 @@ Colaborador.belongsTo(Utilizador, { foreignKey: "utilizador_id", as: "utilizador
 // Organizacao -> Departamento
 Organizacao.hasMany(Departamento, { foreignKey: "organizacao_id", as: "departamentos" });
 Departamento.belongsTo(Organizacao, { foreignKey: "organizacao_id", as: "organizacao" });
+
+// Departamento -> Seccoes
+Departamento.hasMany(Seccao, { foreignKey: "departamento_id", as: "seccoes" });
+Seccao.belongsTo(Departamento, { foreignKey: "departamento_id", as: "departamento" });
+
+// Organizacao -> Seccoes
+Organizacao.hasMany(Seccao, { foreignKey: "organizacao_id", as: "seccoes" });
+Seccao.belongsTo(Organizacao, { foreignKey: "organizacao_id", as: "organizacao" });
 
 // Departamento -> Colaboradores
 Departamento.hasMany(Colaborador, { foreignKey: "departamento_id", as: "colaboradores" });
@@ -248,6 +257,7 @@ module.exports = {
   Colaborador,
   Departamento,
   Cargo,
+  Seccao,
   Contrato,
   Ferias,
   SolicitacaoFerias,
