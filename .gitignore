@@ -7,3 +7,6 @@ yarn-debug.log*
 yarn-error.log*
 .DS_Store
 *.pem
+srv.log
+srv*.log
+srv*.err.log
