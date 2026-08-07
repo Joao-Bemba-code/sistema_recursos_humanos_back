@@ -1,0 +1,105 @@
+◇ injected env (7) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+◇ injected env (0) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+=================================
+ SGHR v1.0.0 - CENFFOR
+ Server on porta 8000
+=================================
+ Conectado com sucesso ao banco!
+ conexao com BD estabelecida!
+ a verificar colunas na BD...
+ Coluna 'nome_completo' alterada para NULL!
+ Coluna 'telefone' adicionada a seccoes!
+ Coluna 'email' adicionada a seccoes!
+ Coluna 'localizacao' adicionada a seccoes!
+ A sincronizar dados iniciais...
+ Erro no seed: Validation error
+Error
+    at Query.run (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\sequelize\lib\dialects\mysql\query.js:52:25)
+    at C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\sequelize\lib\sequelize.js:315:28
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async MySQLQueryInterface.insert (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\sequelize\lib\dialects\abstract\query-interface.js:308:21)
+    at async model.save (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\sequelize\lib\model.js:2490:35)
+    at async Organizacao.create (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\sequelize\lib\model.js:1362:12)
+    at async seed (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\seed.js:158:13)
+    at async Server.<anonymous> (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\index.js:146:5) {
+  name: 'SequelizeUniqueConstraintError',
+  errors: [
+    ValidationErrorItem {
+      message: 'dominio must be unique',
+      type: 'unique violation',
+      path: 'dominio',
+      value: 'cenffor',
+      origin: 'DB',
+      instance: [Organizacao],
+      validatorKey: 'not_unique',
+      validatorName: null,
+      validatorArgs: []
+    }
+  ],
+  parent: Error: Duplicate entry 'cenffor' for key 'dominio'
+      at Packet.asError (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\mysql2\lib\packets\packet.js:833:17)
+      at Execute.execute (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\mysql2\lib\commands\command.js:29:26)
+      at Connection.handlePacket (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\mysql2\lib\base\connection.js:554:34)
+      at PacketParser.onPacket (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\mysql2\lib\base\connection.js:104:12)
+      at PacketParser.executeStart (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\mysql2\lib\packet_parser.js:75:16)
+      at TLSSocket.<anonymous> (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\mysql2\lib\base\connection.js:441:25)
+      at TLSSocket.emit (node:events:509:28)
+      at addChunk (node:internal/streams/readable:563:12)
+      at readableAddChunkPushByteMode (node:internal/streams/readable:514:3)
+      at Readable.push (node:internal/streams/readable:394:5) {
+    code: 'ER_DUP_ENTRY',
+    errno: 1062,
+    sqlState: '23000',
+    sqlMessage: "Duplicate entry 'cenffor' for key 'dominio'",
+    sql: 'INSERT INTO `organizacoes` (`id`,`nome`,`nome_curto`,`nif`,`email`,`telefone`,`cidade`,`provincia`,`pais`,`dominio`,`activo`,`createdAt`,`updatedAt`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?);',
+    parameters: [
+      'b65acda3-b490-47ce-b380-278ab748e0d8',
+      'Centro de Formação Profissional CENFFOR',
+      'CENFFOR',
+      '5417279310',
+      'geral@cenffor.co.ao',
+      '+244 923 456 789',
+      'Luanda',
+      'Luanda',
+      'Angola',
+      'cenffor',
+      true,
+      '2026-08-07 10:37:40',
+      '2026-08-07 10:37:40'
+    ]
+  },
+  original: Error: Duplicate entry 'cenffor' for key 'dominio'
+      at Packet.asError (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\mysql2\lib\packets\packet.js:833:17)
+      at Execute.execute (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\mysql2\lib\commands\command.js:29:26)
+      at Connection.handlePacket (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\mysql2\lib\base\connection.js:554:34)
+      at PacketParser.onPacket (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\mysql2\lib\base\connection.js:104:12)
+      at PacketParser.executeStart (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\mysql2\lib\packet_parser.js:75:16)
+      at TLSSocket.<anonymous> (C:\Users\PC\Documents\sistema_recursos_humanos\sistema_recursos_humanos_back\node_modules\mysql2\lib\base\connection.js:441:25)
+      at TLSSocket.emit (node:events:509:28)
+      at addChunk (node:internal/streams/readable:563:12)
+      at readableAddChunkPushByteMode (node:internal/streams/readable:514:3)
+      at Readable.push (node:internal/streams/readable:394:5) {
+    code: 'ER_DUP_ENTRY',
+    errno: 1062,
+    sqlState: '23000',
+    sqlMessage: "Duplicate entry 'cenffor' for key 'dominio'",
+    sql: 'INSERT INTO `organizacoes` (`id`,`nome`,`nome_curto`,`nif`,`email`,`telefone`,`cidade`,`provincia`,`pais`,`dominio`,`activo`,`createdAt`,`updatedAt`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?);',
+    parameters: [
+      'b65acda3-b490-47ce-b380-278ab748e0d8',
+      'Centro de Formação Profissional CENFFOR',
+      'CENFFOR',
+      '5417279310',
+      'geral@cenffor.co.ao',
+      '+244 923 456 789',
+      'Luanda',
+      'Luanda',
+      'Angola',
+      'cenffor',
+      true,
+      '2026-08-07 10:37:40',
+      '2026-08-07 10:37:40'
+    ]
+  },
+  fields: { dominio: 'cenffor' },
+  sql: 'INSERT INTO `organizacoes` (`id`,`nome`,`nome_curto`,`nif`,`email`,`telefone`,`cidade`,`provincia`,`pais`,`dominio`,`activo`,`createdAt`,`updatedAt`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?);'
+}

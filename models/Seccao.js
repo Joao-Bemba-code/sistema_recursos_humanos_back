@@ -31,6 +31,18 @@ var Seccao = sequelize.define("Seccao", {
     type: DataTypes.STRING(200),
     allowNull: true,
   },
+  telefone: {
+    type: DataTypes.STRING(20),
+    allowNull: true,
+  },
+  email: {
+    type: DataTypes.STRING(150),
+    allowNull: true,
+  },
+  localizacao: {
+    type: DataTypes.STRING(200),
+    allowNull: true,
+  },
   nivel: {
     type: DataTypes.INTEGER,
     defaultValue: 1,

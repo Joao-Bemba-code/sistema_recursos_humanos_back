@@ -1,4 +1,4 @@
-var { Seccao } = require("../models");
+var { Seccao, SeccaoMembro, Colaborador } = require("../models");
 var { Op } = require("sequelize");
 
 exports.listar = async (req, res, next) => {
@@ -83,6 +83,56 @@ exports.eliminar = async (req, res, next) => {
     if (!sec) return res.status(404).json({ error: "Secção não encontrada" });
     await sec.destroy();
     res.json({ message: "Secção eliminada com sucesso" });
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.membros = async (req, res, next) => {
+  try {
+    const membros = await SeccaoMembro.findAll({
+      where: { seccao_id: req.params.id },
+      include: [
+        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "email_institucional", "telefone", "fotografia"] },
+      ],
+      order: [["funcao", "ASC"], ["createdAt", "ASC"]],
+    });
+    res.json({ dados: membros });
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.adicionarMembro = async (req, res, next) => {
+  try {
+    const { colaborador_id, funcao } = req.body;
+    if (!colaborador_id) {
+      return res.status(400).json({ error: "O colaborador é obrigatório" });
+    }
+    const sec = await Seccao.findByPk(req.params.id);
+    if (!sec) return res.status(404).json({ error: "Secção não encontrada" });
+
+    const [membro, criado] = await SeccaoMembro.findOrCreate({
+      where: { seccao_id: req.params.id, colaborador_id },
+      defaults: { funcao: funcao || "Membro" },
+    });
+    if (!criado && funcao) {
+      await membro.update({ funcao: funcao });
+    }
+    res.status(201).json({ dados: membro, message: "Membro adicionado à secção" });
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.removerMembro = async (req, res, next) => {
+  try {
+    const membro = await SeccaoMembro.findOne({
+      where: { seccao_id: req.params.id, colaborador_id: req.params.colaboradorId },
+    });
+    if (!membro) return res.status(404).json({ error: "Membro não encontrado na secção" });
+    await membro.destroy();
+    res.json({ message: "Membro removido da secção" });
   } catch (e) {
     next(e);
   }

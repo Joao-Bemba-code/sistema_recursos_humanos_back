@@ -6,6 +6,7 @@ var Utilizador = require("./Utilizador");
 var Colaborador = require("./Colaborador");
 var { Departamento, Cargo } = require("./Estrutura");
 var Seccao = require("./Seccao");
+var SeccaoMembro = require("./SeccaoMembro");
 var Contrato = require("./Contrato");
 var { Ferias, SolicitacaoFerias, Licenca } = require("./FeriasLicencas");
 var { RegistoPresenca, Turno } = require("./Assiduidade");
@@ -45,6 +46,12 @@ Seccao.belongsTo(Departamento, { foreignKey: "departamento_id", as: "departament
 // Organizacao -> Seccoes
 Organizacao.hasMany(Seccao, { foreignKey: "organizacao_id", as: "seccoes" });
 Seccao.belongsTo(Organizacao, { foreignKey: "organizacao_id", as: "organizacao" });
+
+// Seccao -> Membros (seccoes_colaboradores)
+Seccao.hasMany(SeccaoMembro, { foreignKey: "seccao_id", as: "membros" });
+SeccaoMembro.belongsTo(Seccao, { foreignKey: "seccao_id", as: "seccao" });
+Colaborador.hasMany(SeccaoMembro, { foreignKey: "colaborador_id", as: "seccoes_membro" });
+SeccaoMembro.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador" });
 
 // Departamento -> Colaboradores
 Departamento.hasMany(Colaborador, { foreignKey: "departamento_id", as: "colaboradores" });
@@ -242,6 +249,26 @@ var syncDatabase = async () => {
     } catch (alterErr7) {
       console.log(" Aviso: problema ao adicionar colunas de contratos:", alterErr7.message);
     }
+
+    try {
+      var resultado8 = await sequelize.query("SHOW COLUMNS FROM `seccoes`");
+      var colunas8 = Array.isArray(resultado8[0]) ? resultado8[0] : resultado8;
+      var nomes8 = colunas8.map(function(c) { return c.Field; });
+      if (nomes8.indexOf("telefone") === -1) {
+        await sequelize.query("ALTER TABLE `seccoes` ADD COLUMN `telefone` VARCHAR(20) NULL");
+        console.log(" Coluna 'telefone' adicionada a seccoes!");
+      }
+      if (nomes8.indexOf("email") === -1) {
+        await sequelize.query("ALTER TABLE `seccoes` ADD COLUMN `email` VARCHAR(150) NULL");
+        console.log(" Coluna 'email' adicionada a seccoes!");
+      }
+      if (nomes8.indexOf("localizacao") === -1) {
+        await sequelize.query("ALTER TABLE `seccoes` ADD COLUMN `localizacao` VARCHAR(200) NULL");
+        console.log(" Coluna 'localizacao' adicionada a seccoes!");
+      }
+    } catch (alterErr8) {
+      console.log(" Aviso: problema ao adicionar colunas de seccoes:", alterErr8.message);
+    }
   } catch (e) {
     console.log(" Erro ao sincronizar BD:", e.message);
     throw e;
@@ -258,6 +285,7 @@ module.exports = {
   Departamento,
   Cargo,
   Seccao,
+  SeccaoMembro,
   Contrato,
   Ferias,
   SolicitacaoFerias,
