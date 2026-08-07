@@ -269,6 +269,18 @@ var syncDatabase = async () => {
     } catch (alterErr8) {
       console.log(" Aviso: problema ao adicionar colunas de seccoes:", alterErr8.message);
     }
+
+    try {
+      var resultado9 = await sequelize.query("SHOW COLUMNS FROM `seccoes_colaboradores`");
+      var colunas9 = Array.isArray(resultado9[0]) ? resultado9[0] : resultado9;
+      var nomes9 = colunas9.map(function(c) { return c.Field; });
+      if (nomes9.indexOf("funcao") !== -1) {
+        await sequelize.query("ALTER TABLE `seccoes_colaboradores` MODIFY COLUMN `funcao` VARCHAR(100) NULL DEFAULT NULL");
+        console.log(" Coluna 'funcao' de seccoes_colaboradores alterada para texto livre!");
+      }
+    } catch (alterErr9) {
+      console.log(" Aviso: problema ao alterar coluna funcao de seccoes_colaboradores:", alterErr9.message);
+    }
   } catch (e) {
     console.log(" Erro ao sincronizar BD:", e.message);
     throw e;

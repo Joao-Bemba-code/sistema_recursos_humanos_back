@@ -16,8 +16,9 @@ var SeccaoMembro = sequelize.define("SeccaoMembro", {
     allowNull: false,
   },
   funcao: {
-    type: DataTypes.ENUM("Responsavel", "Membro"),
-    defaultValue: "Membro",
+    type: DataTypes.STRING,
+    allowNull: true,
+    defaultValue: null,
   },
 }, {
   tableName: "seccoes_colaboradores",
