@@ -153,7 +153,7 @@ var create = async function (req, res) {
         var admins = await Utilizador.findAll({
           where: { perfil_id: { [Op.in]: adminPerfilIds }, organizacao_id: req.utilizador.organizacao_id },
         });
-        var tipoLabels = { ferias: "Férias", adiantamento: "Adiantamento", justificacao: "Justificação", aumento: "Aumento", outro: "Outro" };
+        var tipoLabels = { ferias: "Férias", adiantamento: "Adiantamento", justificacao: "Justificação", aumento: "Aumento", dispensa: "Dispensa", licenca: "Licença", outro: "Outro" };
         for (var i = 0; i < admins.length; i++) {
           await notificacaoController.create({
             organizacao_id: req.utilizador.organizacao_id,

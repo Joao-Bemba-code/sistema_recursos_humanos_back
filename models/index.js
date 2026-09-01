@@ -281,6 +281,20 @@ var syncDatabase = async () => {
     } catch (alterErr9) {
       console.log(" Aviso: problema ao alterar coluna funcao de seccoes_colaboradores:", alterErr9.message);
     }
+
+    try {
+      var resultado10 = await sequelize.query("SHOW COLUMNS FROM `pedidos_colaborador` LIKE 'tipo'");
+      var colunasTipo = Array.isArray(resultado10[0]) ? resultado10[0] : resultado10;
+      if (colunasTipo.length > 0) {
+        var tipoAtual = colunasTipo[0].Type || "";
+        if (tipoAtual.indexOf("dispensa") === -1 || tipoAtual.indexOf("licenca") === -1) {
+          await sequelize.query("ALTER TABLE `pedidos_colaborador` MODIFY COLUMN `tipo` ENUM('ferias','adiantamento','justificacao','aumento','dispensa','licenca','outro') NOT NULL");
+          console.log(" Coluna 'tipo' de pedidos_colaborador expandida (dispensa, licenca)!");
+        }
+      }
+    } catch (alterErr10) {
+      console.log(" Aviso: problema ao expandir enum tipo de pedidos_colaborador:", alterErr10.message);
+    }
   } catch (e) {
     console.log(" Erro ao sincronizar BD:", e.message);
     throw e;

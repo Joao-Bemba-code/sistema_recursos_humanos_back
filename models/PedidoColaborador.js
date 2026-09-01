@@ -16,7 +16,7 @@ var PedidoColaborador = sequelize.define("PedidoColaborador", {
     allowNull: false,
   },
   tipo: {
-    type: DataTypes.ENUM("ferias", "adiantamento", "justificacao", "aumento", "outro"),
+    type: DataTypes.ENUM("ferias", "adiantamento", "justificacao", "aumento", "dispensa", "licenca", "outro"),
     allowNull: false,
   },
   titulo: {
