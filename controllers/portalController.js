@@ -3,24 +3,17 @@ var { Op } = require("sequelize");
 
 var calcularDescontoEstimado = async function (colaborador_id) {
   try {
-    var ano = new Date().getFullYear();
-    var mes = new Date().getMonth() + 1;
-    var strInicio = ano + "-" + (mes < 10 ? "0" + mes : mes) + "-01";
-    var ultimoDia = new Date(ano, mes, 0).getDate();
-    var strFim = ano + "-" + (mes < 10 ? "0" + mes : mes) + "-" + ultimoDia;
-
     var faltas = await RegistoPresenca.findAll({
       where: {
         colaborador_id: colaborador_id,
         estado: { [Op.in]: ["Ausente", "Atrasado"] },
         justificado: false,
-        data: { [Op.between]: [strInicio, strFim] },
       },
       attributes: ["data", "estado", "hora_entrada"],
     });
 
     if (faltas.length === 0) {
-      return { faltas_mes: 0, horas_descontar: 0, valor: 0, salario_diario: 0, meses: [] };
+      return { faltas_mes: 0, atrasos_mes: 0, horas_descontar: 0, valor: 0, salario_diario: 0, salario_hora: 0, salario_base: 0 };
     }
 
     var contrato = await Contrato.findOne({ where: { colaborador_id: colaborador_id, estado: "Activo" } });
