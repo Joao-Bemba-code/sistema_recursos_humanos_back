@@ -33,7 +33,14 @@ if (sslEnabled) {
     sequelizeOptions.dialectOptions = {
         ssl: {
             require: true,
-            rejectUnauthorized: true
+            rejectUnauthorized: false
+        }
+    };
+} else {
+    sequelizeOptions.dialectOptions = {
+        ssl: {
+            require: true,
+            rejectUnauthorized: false
         }
     };
 }
