@@ -32,7 +32,14 @@ var faltasRoutes = require("./routers/faltas");
 var pdfRoutes = require("./routers/pdf");
 var ocorrenciaRoutes = require("./routers/ocorrencias");
 
-var seed = require("./seed");
+// CORREÇÃO: Importação protegida do módulo seed para evitar o crash MODULE_NOT_FOUND
+var seed = null;
+try {
+  seed = require("./seed");
+} catch (e) {
+  console.log("⚠️ Aviso: O módulo de seed não foi encontrado ou falhou ao carregar.");
+}
+
 var migrations = require("./migrations");
 var { sequelize, syncDatabase } = require("./models");
 
@@ -103,7 +110,7 @@ app.use("/api/folha-salarial", authenticate, folhaSalarialRoutes);
 app.use("/api/notificacoes", authenticate, notificacaoRoutes);
 app.use("/api/pedidos", authenticate, pedidoRoutes);
 app.use("/api/portal", authenticate, portalRoutes);
-app.use("/api/faltas", authenticate, faltasRoutes);
+2app.use("/api/faltas", authenticate, faltasRoutes);
 app.use("/api/pdf", authenticate, pdfRoutes);
 app.use("/api/ocorrencias", authenticate, ocorrenciaRoutes);
 
@@ -149,7 +156,18 @@ app.listen(port, async function () {
   try {
     await migrations();
     await syncDatabase();
-    await seed();
+    
+    // CORREÇÃO: Execução condicional e segura do seed
+    if (seed && typeof seed === "function") {
+      await seed();
+      console.log(" Seeds executadas com sucesso!");
+    } else if (seed && typeof seed.seed === "function") {
+      await seed.seed();
+      console.log(" Seeds executadas com sucesso!");
+    } else {
+      console.log(" Ficheiro de seed ignorado (não definido ou sem função válida).");
+    }
+
   } catch (e) {
     console.log(" Erro ao iniciar:", e.message);
   }
