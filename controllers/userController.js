@@ -1,5 +1,14 @@
 var { Op } = require("sequelize");
-var { Utilizador, Perfil, Organizacao } = require("../models");
+var { Utilizador, Perfil, Organizacao, Colaborador } = require("../models");
+
+var montarPerfis = function (utilizador) {
+  var lista = [];
+  if (utilizador.perfil) lista.push(utilizador.perfil);
+  (utilizador.perfis_extra || []).forEach(function (p) {
+    if (p && !lista.some(function (x) { return x.id === p.id; })) lista.push(p);
+  });
+  return lista;
+};
 
 var list = async function (req, res) {
   try {
@@ -8,6 +17,7 @@ var list = async function (req, res) {
     var offset = (page - 1) * limit;
     var search = req.query.search || "";
     var estado = req.query.estado;
+    var perfil_id = req.query.perfil_id;
 
     var where = {};
     if (req.organizacao_id) {
@@ -26,24 +36,99 @@ var list = async function (req, res) {
       where.activo = estado === "true" || estado === "1";
     }
 
-    var { count, rows } = await Utilizador.findAndCountAll({
+    var rows = await Utilizador.findAll({
       where: where,
       include: [
         { model: Perfil, as: "perfil", attributes: ["id", "nome", "nivel"] },
+        { model: Perfil, as: "perfis_extra", attributes: ["id", "nome", "nivel"] },
       ],
       attributes: { exclude: ["password", "token_reset", "token_reset_expira"] },
       order: [["nome_completo", "ASC"]],
-      limit: limit,
-      offset: offset,
     });
 
+    var lista = [];
+    rows.forEach(function (u) {
+      var perfis = montarPerfis(u).map(function (p) {
+        return { id: p.id, nome: p.nome, nivel: p.nivel };
+      });
+      lista.push({
+        id: u.id,
+        nome_completo: u.nome_completo,
+        email: u.email,
+        username: u.username,
+        telefone: u.telefone,
+        activo: u.activo,
+        bloqueado: u.bloqueado,
+        ultimo_login: u.ultimo_login,
+        perfil_id: u.perfil_id,
+        perfil: u.perfil || null,
+        perfis: perfis,
+      });
+    });
+
+    // Colaboradores ainda sem conta de acesso
+    var semConta = await Colaborador.findAll({
+      where: Object.assign(
+        { utilizador_id: null },
+        req.organizacao_id ? { organizacao_id: req.organizacao_id } : {}
+      ),
+      attributes: ["id", "numero_colaborador", "nome_completo", "email_institucional", "email_pessoal", "telefone"],
+      order: [["nome_completo", "ASC"]],
+    });
+    semConta.forEach(function (c) {
+      lista.push({
+        id: "colab_" + c.id,
+        colaborador_id: c.id,
+        numero_colaborador: c.numero_colaborador,
+        nome_completo: c.nome_completo || "",
+        email: c.email_institucional || c.email_pessoal || "",
+        username: null,
+        telefone: c.telefone || null,
+        activo: null,
+        perfil: null,
+        perfil_id: null,
+        sem_conta: true,
+      });
+    });
+
+    // Filtro de perfil: perfil principal OU qualquer perfil adicional
+    if (perfil_id) {
+      lista = lista.filter(function (x) {
+        if (x.sem_conta) return false;
+        if (x.perfil_id && String(x.perfil_id) === String(perfil_id)) return true;
+        return (x.perfis || []).some(function (p) { return String(p.id) === String(perfil_id); });
+      });
+    }
+
+    // Filtro de estado: sem contas nao entram quando ha filtro de estado
+    if (estado !== undefined) {
+      lista = lista.filter(function (x) { return !x.sem_conta; });
+    }
+
+    // Pesquisa sobre o conjunto unificado
+    if (search) {
+      var s = search.toLowerCase();
+      lista = lista.filter(function (x) {
+        return (x.nome_completo && String(x.nome_completo).toLowerCase().indexOf(s) !== -1) ||
+               (x.email && String(x.email).toLowerCase().indexOf(s) !== -1) ||
+               (x.username && String(x.username).toLowerCase().indexOf(s) !== -1);
+      });
+    }
+
+    lista.sort(function (a, b) {
+      return String(a.nome_completo || "").localeCompare(String(b.nome_completo || ""));
+    });
+
+    var total = lista.length;
+    var dados = lista.slice(offset, offset + limit);
+
     return res.status(200).json({
-      dados: rows,
+      dados: dados,
       paginacao: {
-        total: count,
+        total: total,
         pagina: page,
         limite: limit,
-        total_paginas: Math.ceil(count / limit),
+        total_paginas: Math.max(1, Math.ceil(total / limit)),
       },
     });
   } catch (e) {
@@ -59,7 +144,9 @@ var getById = async function (req, res) {
     var utilizador = await Utilizador.findByPk(id, {
       include: [
         { model: Perfil, as: "perfil" },
-        { model: Organizacao, as: "organizacao" },
+        { model: Perfil, as: "perfis_extra" },
+        { model: Organizacao, as: "organizacao", attributes: ["id", "nome"] },
+        { model: Colaborador, as: "colaborador", attributes: ["id", "numero_colaborador", "nome_completo"] },
       ],
       attributes: { exclude: ["password", "token_reset", "token_reset_expira"] },
     });
@@ -68,7 +155,13 @@ var getById = async function (req, res) {
       return res.status(404).json({ error: "Utilizador não encontrado" });
     }
 
-    return res.status(200).json({ dados: utilizador });
+    var json = utilizador.toJSON();
+    json.perfis = montarPerfis(utilizador).map(function (p) {
+      return { id: p.id, nome: p.nome, descricao: p.descricao, nivel: p.nivel, activo: p.activo };
+    });
+    delete json.perfis_extra;
+
+    return res.status(200).json({ dados: json });
   } catch (e) {
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
@@ -76,7 +169,7 @@ var getById = async function (req, res) {
 
 var create = async function (req, res) {
   try {
-    var { nome_completo, email, username, password, telefone, perfil_id, activo } = req.body;
+    var { nome_completo, email, username, password, telefone, perfil_id, perfil_ids, activo, colaborador_id } = req.body;
 
     if (!nome_completo || !email || !username || !password) {
       return res.status(400).json({ error: "Campos obrigatórios: nome_completo, email, username, password" });
@@ -92,17 +185,32 @@ var create = async function (req, res) {
       return res.status(409).json({ error: "Username já está em uso" });
     }
 
+    var perfisSelecionados = Array.isArray(perfil_ids) ? perfil_ids.filter(Boolean) : [];
+    if (perfil_id && perfisSelecionados.indexOf(String(perfil_id)) === -1) {
+      perfisSelecionados.unshift(String(perfil_id));
+    }
+    var perfilPrincipal = perfisSelecionados.length > 0 ? perfisSelecionados[0] : null;
+    var perfisExtras = perfisSelecionados.slice(1);
+
     var novoUtilizador = await Utilizador.create({
       nome_completo: nome_completo,
       email: email.toLowerCase(),
       username: username.toLowerCase(),
       password: password,
       telefone: telefone || null,
-      perfil_id: perfil_id || null,
+      perfil_id: perfilPrincipal,
       organizacao_id: req.organizacao_id,
       activo: activo !== undefined ? activo : true,
       must_change_password: true,
     });
+
+    if (perfisExtras.length > 0) {
+      await novoUtilizador.setPerfis_extra(perfisExtras);
+    }
+
+    if (colaborador_id) {
+      await Colaborador.update({ utilizador_id: novoUtilizador.id }, { where: { id: colaborador_id } });
+    }
 
     var completo = await Utilizador.findByPk(novoUtilizador.id, {
       include: [{ model: Perfil, as: "perfil" }],
@@ -155,6 +263,22 @@ var update = async function (req, res) {
       });
       if (existente) {
         return res.status(409).json({ error: "Username já está em uso" });
+      }
+    }
+
+    // Perfis (principal + adicionais)
+    if (Array.isArray(req.body.perfil_ids)) {
+      var perfisSelecionados = req.body.perfil_ids.filter(Boolean).map(String);
+      var corpoPerfilId = req.body.perfil_id;
+      if (corpoPerfilId && perfisSelecionados.indexOf(String(corpoPerfilId)) === -1) {
+        perfisSelecionados.unshift(String(corpoPerfilId));
+      }
+      if (perfisSelecionados.length === 0) {
+        dadosActualizar.perfil_id = null;
+        await utilizador.setPerfis_extra([]);
+      } else {
+        dadosActualizar.perfil_id = perfisSelecionados[0];
+        await utilizador.setPerfis_extra(perfisSelecionados.slice(1));
       }
     }
 

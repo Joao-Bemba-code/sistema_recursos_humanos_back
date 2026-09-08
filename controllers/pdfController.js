@@ -3,6 +3,7 @@ var path = require("path");
 var fs = require("fs");
 var os = require("os");
 var { Vencimento, Pagamento, Colaborador, Contrato, Organizacao } = require("../models");
+var { listarPagamentosParaResumo } = require("./folhaSalarialController");
 
 var MESES = ["Janeiro","Fevereiro","Marco","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
@@ -637,6 +638,180 @@ exports.contrato = async function (req, res) {
   }
 };
 
+// ==================== AVISO/ADVERTÊNCIA PDF ====================
+
+function getDataAtual() {
+  var d = new Date();
+  var dias = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
+  var diaSemana = dias[d.getDay()];
+  var dia = d.getDate();
+  var mes = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"][d.getMonth()];
+  var ano = d.getFullYear();
+  return diaSemana + ", " + dia + " de " + mes + " de " + ano;
+}
+
+function drawWarningHeader(doc, org, y) {
+  var ml = 40;
+  var w = doc.page.width - 80;
+
+  // Nome da organização (falha para RHKAMATAMBU quando não houver dados)
+  var nomeOrg = (org && org.nome) ? org.nome : "RHKAMATAMBU";
+  doc.font("Helvetica-Bold").fontSize(15).fillColor("#1a1a1a");
+  doc.text(normalizeForPdf(nomeOrg), ml, y, { width: w, align: "center" });
+  y = doc.y + 6;
+
+  // Contactos da organização (quando existirem)
+  var infoOrg = [];
+  if (org && org.endereco) infoOrg.push(normalizeForPdf(org.endereco));
+  if (org && org.cidade) infoOrg.push(normalizeForPdf(org.cidade));
+  if (org && org.nif) infoOrg.push("NIF: " + org.nif);
+  if (infoOrg.length > 0) {
+    doc.font("Helvetica").fontSize(9).fillColor("#555555");
+    doc.text(infoOrg.join("  |  "), ml, y, { width: w, align: "center" });
+    y = doc.y + 6;
+  }
+
+  addLine(doc, y); y = doc.y + 20;
+
+  // Título do documento
+  doc.font("Helvetica-Bold").fontSize(13).fillColor("#000000");
+  doc.text("CARTA DE ADVERTÊNCIA", ml, y, { width: w, align: "center" });
+  y = doc.y + 26;
+
+  return y;
+}
+
+function drawWarningContent(doc, y, colab, descricao, numero) {
+  var ml = 40;
+  var w = doc.page.width - 80;
+
+  // Data e local (um único bloco, sem repetição)
+  var dataAtual = getDataAtual();
+  doc.font("Helvetica").fontSize(10).fillColor("#333333");
+  doc.text(dataAtual, ml, y, { width: w, align: "right" });
+  y = doc.y + 20;
+
+  // Referência automática da ocorrência (OD-ANO-NNNN)
+  doc.font("Helvetica-Bold").fontSize(10).fillColor("#333333");
+  doc.text("Ref.º " + (numero || "s/n") + " — Carta de Advertência", ml, y, { width: w });
+  y = doc.y + 24;
+
+  // Saudação ao colaborador
+  var nomeDest = "";
+  if (colab && colab.nome_completo) {
+    var partes = colab.nome_completo.trim().split(/\s+/);
+    nomeDest = partes[0] + (partes.length > 1 ? " " + partes[partes.length - 1] : "");
+  }
+  doc.font("Helvetica").fontSize(11).fillColor("#000000");
+  doc.text("Prezado(a) Sr.(a) " + (nomeDest || "Colaborador(a)") + ",", ml, y, { width: w });
+  y = doc.y + 20;
+
+  // Parágrafo de enquadramento
+  var textoIndisciplina = "Tendo em vista V. Ex.ª ter cometido ato(s) de indisciplina, em violação da Cláusula oitava (8.ª) dos Deveres do Trabalhador previstos no contrato de trabalho, resolvemos aplicá-la, como medida disciplinar, a presente CARTA DE ADVERTÊNCIA, com o intuito de evitar a reincidência ou o cometimento de outra(s) falta(s) de qualquer natureza prevista em lei, que nos obrigará a tomar outras medidas cabíveis de acordo com a legislação em vigor.";
+  doc.font("Helvetica").fontSize(10).fillColor("#333333").lineGap(3);
+  doc.text(textoIndisciplina, ml, y, { width: w, align: "justify" });
+  y = doc.y + 22;
+
+  // Motivo da advertência (descrição da ocorrência)
+  doc.font("Helvetica").fontSize(10).fillColor("#333333").lineGap(3);
+  doc.text("Motivo: " + (descricao || "Não especificado."), ml, y, { width: w, align: "justify" });
+  y = doc.y + 24;
+
+  // Transcrição da cláusula
+  if (y > 620) { doc.addPage(); y = 50; }
+  doc.font("Helvetica-Bold").fontSize(11).fillColor("#000000");
+  doc.text("CLÁUSULA OITAVA — DO CONTRATO DE TRABALHO", ml, y, { width: w });
+  y = doc.y + 14;
+
+  var clausulaOitava = (
+    "Deveres do trabalhador\n\n" +
+    "1) O trabalhador, aceitando ser admitido ao serviço da Entidade Empregadora, obriga-se ao cumprimento dos regulamentos e determinações escritas ou resultantes das práticas internas e usuais desta, bem como do preceituado na contratação colectiva e demais legislação aplicável e, ainda, mais especificamente:\n\n" +
+    "a) Comparecer ao serviço com assiduidade e realizar o trabalho com zelo e diligência, visando a melhoria da produtividade da empresa;\n\n" +
+    "b) Executar todos os trabalhos com zelo e dedicação, ao serviço e no interesse da Entidade Empregadora, cumprindo estritamente as ordens e instruções dos seus superiores hierárquicos;\n\n" +
+    "c) Cumprir pontualmente o seu horário de trabalho, só prestando trabalho suplementar quando tal for determinado pelos seus superiores hierárquicos competentes para o efeito e dentro dos pressupostos definidos na lei;\n\n" +
+    "d) Guardar sigilo absoluto em todos os assuntos relacionados com a atividade da Entidade Empregadora, e não guardar para si ou para terceiros cópias, duplicados ou documentos daquela;\n\n" +
+    "e) Não exercer fora da atividade prestada à Entidade Empregadora qualquer atividade remunerada sem que para tanto tenha autorização escrita daquela;\n\n" +
+    "f) Deslocar-se ao serviço e a expensas da Entidade Empregadora, a qualquer localidade do país ou do estrangeiro, sempre que tais deslocações sejam necessárias ao exercício da atividade da primeira outorgante;\n\n" +
+    "g) Guardar lealdade à Entidade Empregadora e cumprir as demais obrigações decorrentes do contrato e das normas que o regem;\n\n" +
+    "h) Responsabilizar-se pela guarda e adequada utilização e conservação de todos os bens e valores que, no âmbito do presente contrato, sejam por ele recebidos e manuseados ou que, por qualquer outra forma, se encontrem à sua guarda, responsabilizando-se nos termos gerais pelo ressarcimento de quaisquer prejuízos que venha a causar direta ou indiretamente por um negligente desempenho das suas funções, nomeadamente extravio de bens e valores ou a sua danificação, sem prejuízo de um eventual procedimento disciplinar ou criminal;\n\n" +
+    "i) Abster-se de ter conduta que possa prejudicar o bom nome e a imagem da Entidade Empregadora e seus representantes."
+  );
+
+  var clLines = clausulaOitava.split("\n");
+  for (var c = 0; c < clLines.length; c++) {
+    var clLine = clLines[c].trim();
+    if (!clLine) {
+      y += 8;
+      continue;
+    }
+    if (doc.y > 735) { doc.addPage(); doc.y = 50; }
+    if (clLine.match(/^\d+\)/)) {
+      doc.font("Helvetica-Bold").fontSize(10).fillColor("#333333");
+    } else {
+      doc.font("Helvetica").fontSize(10).fillColor("#333333");
+    }
+    doc.text(clLine, ml, doc.y, { width: w - (clLine.match(/^[a-z]\)/) ? 20 : 0), indent: clLine.match(/^[a-z]\)/) ? 20 : 0, lineGap: 3 });
+  }
+  y = doc.y + 26;
+
+  // Encerramento
+  doc.font("Helvetica").fontSize(10).fillColor("#333333").lineGap(3);
+  doc.text("Para seu conhecimento, transcrevemos o teor da referida cláusula, que deverá ser observada de forma rigorosa. Pedimos que assine o presente aviso, comprometendo-se ao cumprimento das normas internas da instituição.", ml, y, { width: w, align: "justify" });
+  y = doc.y + 40;
+
+  // Assinaturas
+  if (y > 700) { doc.addPage(); doc.y = 50; y = doc.y + 20; }
+  var identGerente = "o/a Gerente";
+  var nomeAssinatura = colab && colab.nome_completo ? colab.nome_completo : "o/a Colaborador(a)";
+  addLine(doc, y); y = doc.y + 16;
+  doc.font("Helvetica-Bold").fontSize(10).fillColor("#000000");
+  doc.text(identGerente, ml, y, { width: 200, align: "center" });
+  doc.text("Assinatura do(a) Colaborador(a)", 320, y, { width: 200, align: "center" });
+  y = doc.y + 24;
+  doc.font("Helvetica").fontSize(9).fillColor("#333333");
+  doc.text("Data: ____/____/______", ml, y, { width: 200, align: "center" });
+  doc.text(nomeAssinatura, 320, y, { width: 200, align: "center" });
+
+  return y;
+}
+
+exports.avisoAdvertencia = async function (req, res) {
+  try {
+    var { colaboradorId } = req.params;
+
+    var colab = null;
+    if (colaboradorId && colaboradorId !== "null" && colaboradorId !== "undefined") {
+      colab = await Colaborador.findByPk(colaboradorId, {
+        include: [{ model: Organizacao, as: "organizacao" }],
+      });
+    }
+
+    var org = colab ? colab.organizacao : null;
+
+    var doc = new PDFDocument({ size: "A4", margin: 50 });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "attachment; filename=aviso_advertencia_" + (colab ? colab.numero_colaborador : "") + ".pdf");
+    doc.pipe(res);
+
+    var y = 50;
+
+    y = drawWarningHeader(doc, org, y);
+
+    // Default description if none provided
+    var descricao = req.query.descricao || "Abandono do posto de trabalho.";
+
+    // Referência automática da ocorrência (OD-ANO-NNNN)
+    var numero = req.query.numero || "";
+
+    y = drawWarningContent(doc, y, colab, descricao, numero);
+
+    doc.end();
+  } catch (e) {
+    console.log("Erro ao gerar PDF aviso/advertencia:", e.message);
+    return res.status(500).json({ error: "Erro ao gerar PDF" });
+  }
+};
+
 // ==================== FICHA COLABORADOR PDF ====================
 
 exports.fichaColaborador = async function (req, res) {
@@ -802,6 +977,193 @@ exports.fichaColaborador = async function (req, res) {
     doc.end();
   } catch (e) {
     console.log("Erro ao gerar PDF ficha colaborador:", e.message);
+    return res.status(500).json({ error: "Erro ao gerar PDF" });
+  }
+};
+
+// ==================== RESUMO PAGAMENTOS PDF ====================
+
+exports.resumoPagamentos = async function (req, res) {
+  try {
+    var { mes, ano } = req.query;
+    if (!mes || !ano) {
+      return res.status(400).json({ error: "mes e ano sao obrigatorios" });
+    }
+
+    var pagamentos = await listarPagamentosParaResumo(parseInt(mes), parseInt(ano));
+    if (pagamentos.length === 0) {
+      return res.status(404).json({ error: "Nenhum pagamento encontrado para o periodo indicado" });
+    }
+
+    // Determinar organizacao a partir do primeiro colaborador
+    var primeiroColab = pagamentos[0] && pagamentos[0].colaborador ? pagamentos[0].colaborador : null;
+    var org = await getOrganizacao(primeiroColab);
+
+    var doc = new PDFDocument({ size: "A4", margin: 40 });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "attachment; filename=resumo_pagamentos_" + mes + "_" + ano + ".pdf");
+    doc.pipe(res);
+
+    var ml = 40;
+    var pw = doc.page.width;
+    var w = doc.page.width - 80;
+    var y = 42;
+
+    if (org && org.logo_url) {
+      try {
+        var logoPath = org.logo_url;
+        if (logoPath.startsWith("/uploads/")) { logoPath = path.join(__dirname, "..", logoPath); }
+        if (fs.existsSync(logoPath)) {
+          doc.image(logoPath, pw / 2 - 35, y, { fit: [70, 70] });
+          y += 78;
+        }
+      } catch (e) {}
+    }
+
+    if (org && org.nome) {
+      doc.font("Helvetica-Bold").fontSize(16).fillColor("#000000");
+      doc.text(normalizeForPdf(org.nome), ml, y, { align: "center", width: w });
+      y += 24;
+    }
+
+    doc.font("Helvetica-Bold").fontSize(14).fillColor("#1a1a1a");
+    doc.text("Resumo de Pagamentos", ml, y, { align: "center", width: w });
+    y += 18;
+
+    doc.font("Helvetica").fontSize(10).fillColor("#666666");
+    doc.text("Mes de " + MESES[parseInt(mes) - 1] + " de " + ano, ml, y, { align: "center", width: w });
+    y += 24;
+
+    // Agregacao
+    var totalColab = pagamentos.length;
+    var totalBruto = 0, totalSubsidios = 0, totalExtras = 0, totalIRT = 0, totalSS = 0, totalFaltas = 0, totalLiquido = 0;
+    var porEstado = { Pendente: 0, Pago: 0, Cancelado: 0 };
+
+    pagamentos.forEach(function (p) {
+      totalBruto += parseFloat(p.salario_base) || 0;
+      totalSubsidios += parseFloat(p.subsidios) || 0;
+      totalExtras += parseFloat(p.horas_extras) || 0;
+      totalIRT += parseFloat(p.irt) || 0;
+      totalSS += parseFloat(p.seguranca_social) || 0;
+      totalFaltas += parseFloat(p.desconto_faltas) || 0;
+      totalLiquido += parseFloat(p.total_liquido) || 0;
+      if (porEstado[p.estado] !== undefined) porEstado[p.estado]++;
+    });
+
+    // Bloco resumo
+    doc.font("Helvetica-Bold").fontSize(11).fillColor("#333333");
+    doc.text("SUMARIO DO PERIODO", ml, y);
+    y += 16;
+
+    function resumoRow(label, value) {
+      doc.font("Helvetica").fontSize(10).fillColor("#000000");
+      doc.text(label, ml + 8, y);
+      doc.text(value, pw - 60 - 180, y, { align: "right", width: 180 });
+      y += 18;
+    }
+
+    resumoRow("Total de Colaboradores", String(totalColab));
+    resumoRow("Total Vencimentos (Bruto)", fmt(totalBruto) + " Kz");
+    resumoRow("  Subsidios", fmt(totalSubsidios) + " Kz");
+    resumoRow("  Horas Extras", fmt(totalExtras) + " Kz");
+    resumoRow("Total IRT", "- " + fmt(totalIRT) + " Kz");
+    resumoRow("Total Seguranca Social", "- " + fmt(totalSS) + " Kz");
+    resumoRow("Total Desconto Faltas", "- " + fmt(totalFaltas) + " Kz");
+
+    var ly = y;
+    doc.rect(40, ly - 6, pw - 80, 26).fill("#eef2f7");
+    doc.fillColor("#111111").font("Helvetica-Bold").fontSize(13);
+    doc.text("TOTAL LIQUIDO A PAGAR", ml + 8, ly);
+    doc.text(fmt(totalLiquido) + " Kz", pw - 60 - 180, ly, { align: "right", width: 180 });
+    y = ly + 26;
+
+    doc.font("Helvetica").fontSize(9).fillColor("#666666");
+    doc.text("Estado: Pendente " + porEstado.Pendente + " | Pago " + porEstado.Pago + " | Cancelado " + porEstado.Cancelado, ml, y);
+    y += 24;
+
+    // Tabela de detalhes
+    addLine(doc, y); y += 6;
+
+    if (y > 560) { doc.addPage(); y = 50; }
+
+    doc.font("Helvetica-Bold").fontSize(11).fillColor("#333333");
+    doc.text("DETALHE POR COLABORADOR", ml, y);
+    y += 18;
+
+    var headers = ["N.", "Colaborador", "Salario Base", "Subsidios", "Extras", "IRT", "SS", "Faltas", "Liquido", "Estado"];
+    var colWidths = [30, 170, 70, 65, 55, 60, 55, 55, 70, 60];
+    var startX = 40;
+    var tableW = pw - 80;
+
+    function drawRow(cells, yPos, isHeader, isTotal) {
+      var x = startX;
+      doc.font(isHeader || isTotal ? "Helvetica-Bold" : "Helvetica").fontSize(isHeader ? 8.5 : 8).fillColor(isHeader ? "#ffffff" : isTotal ? "#111111" : "#333333");
+      if (isHeader) {
+        doc.rect(startX, yPos - 5, tableW, 18).fill("#2b3a4a");
+        doc.fillColor("#ffffff");
+      } else if (isTotal) {
+        doc.rect(startX, yPos - 5, tableW, 18).fill("#eef2f7");
+        doc.fillColor("#111111");
+      }
+      x = startX;
+      for (var c = 0; c < cells.length; c++) {
+        doc.text(String(cells[c]), x + 3, yPos, { width: colWidths[c] - 6, height: 14, ellipsis: true });
+        x += colWidths[c];
+      }
+      return yPos + 14;
+    }
+
+    // Header
+    var headerCells = headers.slice();
+    drawRow(headerCells, y, true, false);
+    y += 18;
+    doc.fillColor("#333333").font("Helvetica");
+
+    for (var r = 0; r < pagamentos.length; r++) {
+      var p = pagamentos[r];
+      if (y > 740) {
+        doc.addPage();
+        y = 50;
+        drawRow(headers.slice(), y, true, false);
+        y += 18;
+      }
+      var nome = (p.colaborador ? p.colaborador.nome_completo : "") || "";
+      if (nome.length > 28) nome = nome.substring(0, 26) + "...";
+      var rowCells = [
+        (r + 1),
+        nome,
+        fmt(p.salario_base),
+        fmt(p.subsidios),
+        fmt(p.horas_extras),
+        fmt(p.irt),
+        fmt(p.seguranca_social),
+        fmt(p.desconto_faltas),
+        fmt(p.total_liquido),
+        p.estado,
+      ];
+      y = drawRow(rowCells, y, false, false);
+    }
+
+    // Linha de total
+    y += 2;
+    drawRow([
+      "",
+      "TOTAL",
+      fmt(totalBruto),
+      fmt(totalSubsidios),
+      fmt(totalExtras),
+      fmt(totalIRT),
+      fmt(totalSS),
+      fmt(totalFaltas),
+      fmt(totalLiquido),
+      "",
+    ], y, false, true);
+    y += 24;
+
+    drawFooter(doc, org);
+    doc.end();
+  } catch (e) {
+    console.log("Erro ao gerar PDF resumo pagamentos:", e.message);
     return res.status(500).json({ error: "Erro ao gerar PDF" });
   }
 };

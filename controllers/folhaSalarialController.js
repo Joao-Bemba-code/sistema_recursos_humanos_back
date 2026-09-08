@@ -502,4 +502,144 @@ var removePagamento = async function (req, res) {
   }
 };
 
-module.exports = { listVencimentos, getVencimento, createVencimento, updateVencimento, removeVencimentos, listPagamentos, createPagamento, updatePagamento, removePagamento, recalcularFaltas, getContratoActual };
+var getSalarioContrato = async function (colaborador_id) {
+  try {
+    var contrato = await sequelize.query(
+      "SELECT salario_base, subsidio_alimentacao FROM contratos WHERE colaborador_id = ? AND estado = 'Activo' ORDER BY createdAt DESC LIMIT 1",
+      { replacements: [colaborador_id], type: sequelize.QueryTypes.SELECT }
+    );
+    if (!contrato || contrato.length === 0) {
+      contrato = await sequelize.query(
+        "SELECT salario_base, subsidio_alimentacao FROM contratos WHERE colaborador_id = ? ORDER BY createdAt DESC LIMIT 1",
+        { replacements: [colaborador_id], type: sequelize.QueryTypes.SELECT }
+      );
+    }
+    if (!contrato || contrato.length === 0) return null;
+    return contrato[0];
+  } catch (e) {
+    console.log("Erro ao buscar salario do contrato:", e.message);
+    return null;
+  }
+};
+
+// ==================== GERAR PAGAMENTOS AUTOMATICOS ====================
+
+var gerarPagamentosAutomaticos = async function (req, res) {
+  var t = await sequelize.transaction();
+  try {
+    var { mes, ano } = req.body;
+    if (!mes || !ano) {
+      return res.status(400).json({ error: "mes e ano sao obrigatorios" });
+    }
+
+    // Colaboradores ativos
+    var colaboradores = await Colaborador.findAll({
+      where: { estado: "Activo" },
+      attributes: ["id", "nome_completo", "numero_colaborador"],
+    });
+
+    if (colaboradores.length === 0) {
+      return res.status(400).json({ error: "Nenhum colaborador ativo encontrado" });
+    }
+
+    var toNum = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; };
+
+    var criados = [];
+    var ignorados = [];
+    var erros = [];
+
+    for (var i = 0; i < colaboradores.length; i++) {
+      var colab = colaboradores[i];
+
+      // Verificacao de pagamento existente
+      var existente = await Pagamento.findOne({
+        where: { colaborador_id: colab.id, mes: mes, ano: ano },
+        transaction: t,
+      });
+      if (existente) {
+        ignorados.push({ colaborador_id: colab.id, motivo: "Ja existe pagamento" });
+        continue;
+      }
+
+      var contrato = await getSalarioContrato(colab.id);
+      if (!contrato || !contrato.salario_base) {
+        erros.push({ colaborador_id: colab.id, motivo: "Sem contrato ativo com salario" });
+        continue;
+      }
+
+      var salarioBase = toNum(contrato.salario_base);
+      var subsidios = toNum(contrato.subsidio_alimentacao);
+
+      var obrigatorios = calcularDescontosObrigatorios(salarioBase, subsidios, 0);
+      var descontoFaltas = await calcularDescontoFaltas(colab.id, parseInt(mes), parseInt(ano));
+      var totalLiquido = Math.round((salarioBase + subsidios - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas) * 100) / 100;
+
+      var pagamentoDados = {
+        colaborador_id: colab.id,
+        mes: parseInt(mes),
+        ano: parseInt(ano),
+        salario_base: salarioBase,
+        subsidios: subsidios,
+        horas_extras: 0,
+        descontos: 0,
+        irt: obrigatorios.irt,
+        seguranca_social: obrigatorios.seguranca_social,
+        desconto_faltas: descontoFaltas,
+        total_liquido: totalLiquido,
+        estado: "Pendente",
+      };
+
+      try {
+        var pagamento = await Pagamento.create(pagamentoDados, { transaction: t });
+        criados.push({ colaborador_id: colab.id, total_liquido: totalLiquido, id: pagamento.id });
+      } catch (erroInterno) {
+        if (erroInterno.name === "SequelizeUniqueConstraintError") {
+          ignorados.push({ colaborador_id: colab.id, motivo: "Ja existe pagamento" });
+        } else {
+          erros.push({ colaborador_id: colab.id, motivo: erroInterno.message });
+        }
+      }
+    }
+
+    await t.commit();
+
+    return res.status(200).json({
+      mensagem: "Pagamentos processados com sucesso",
+      dados: {
+        total_colaboradores: colaboradores.length,
+        criados: criados.length,
+        ignorados: ignorados.length,
+        erros: erros.length,
+        pagamentos_criados: criados,
+        ignorados_detalhe: ignorados,
+        erros_detalhe: erros,
+      },
+    });
+  } catch (e) {
+    await t.rollback();
+    console.log("Erro ao gerar pagamentos automaticos:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+// ==================== RESUMO PDF (dados) ====================
+
+var listarPagamentosParaResumo = async function (mes, ano) {
+  var where = { mes: mes, ano: ano };
+  var include = [
+    { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
+  ];
+  try {
+    var pagamentos = await Pagamento.findAll({
+      where: where,
+      include: include,
+      order: [["createdAt", "ASC"]],
+    });
+    return pagamentos;
+  } catch (e) {
+    console.log("Erro ao listar pagamentos para resumo:", e.message);
+    return [];
+  }
+};
+
+module.exports = { listVencimentos, getVencimento, createVencimento, updateVencimento, removeVencimentos, listPagamentos, createPagamento, updatePagamento, removePagamento, recalcularFaltas, gerarPagamentosAutomaticos, listarPagamentosParaResumo, getContratoActual };

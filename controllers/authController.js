@@ -1,5 +1,6 @@
 var jwt = require("jsonwebtoken");
 var { Utilizador, Perfil, Organizacao, Colaborador } = require("../models");
+var { prepararUtilizador, fundirPermissoes, normalizarPermissoes } = require("../protect/rbac");
 
 var SENHA_PADRAO = "colaborador123";
 
@@ -23,6 +24,44 @@ var generateRefreshToken = function (utilizador) {
   );
 };
 
+var serializarUtilizador = function (utilizador) {
+  prepararUtilizador(utilizador);
+
+  var perfisTodos = [];
+  if (utilizador.perfil) perfisTodos.push(utilizador.perfil);
+  (utilizador.perfis_extra || []).forEach(function (p) {
+    if (p && !perfisTodos.some(function (x) { return x.id === p.id; })) perfisTodos.push(p);
+  });
+
+  var perfisJson = perfisTodos.map(function (p) {
+    return {
+      id: p.id,
+      nome: p.nome,
+      descricao: p.descricao,
+      nivel: p.nivel,
+      activo: p.activo,
+      permissoes: normalizarPermissoes(p.permissoes),
+    };
+  });
+
+  var fundido = fundirPermissoes(perfisJson);
+
+  var json = utilizador.toJSON();
+  delete json.password;
+  delete json.token_reset;
+  delete json.token_reset_expira;
+  delete json.perfis_extra;
+
+  if (json.perfil) {
+    json.perfil.permissoes = fundido.permissoes;
+    json.perfil.nivel = fundido.nivel;
+  }
+  json.perfis = perfisJson;
+  json.multiPerfil = perfisJson.length > 1;
+
+  return json;
+};
+
 var login = async function (req, res) {
   try {
     var { email, username, password } = req.body;
@@ -40,6 +79,7 @@ var login = async function (req, res) {
       where: where,
       include: [
         { model: Perfil, as: "perfil" },
+        { model: Perfil, as: "perfis_extra" },
         { model: Organizacao, as: "organizacao" },
       ],
     });
@@ -83,6 +123,7 @@ var login = async function (req, res) {
         utilizador = await Utilizador.findByPk(utilizador.id, {
           include: [
             { model: Perfil, as: "perfil" },
+            { model: Perfil, as: "perfis_extra" },
             { model: Organizacao, as: "organizacao" },
           ],
         });
@@ -127,7 +168,7 @@ var login = async function (req, res) {
       mensagem: "Login realizado com sucesso",
       token: token,
       refreshToken: refreshToken,
-      utilizador: utilizador.toJSON(),
+      utilizador: serializarUtilizador(utilizador),
     });
   } catch (e) {
     console.log("Erro no login:", e.message);
@@ -188,6 +229,7 @@ var register = async function (req, res) {
     var completo = await Utilizador.findByPk(novoUtilizador.id, {
       include: [
         { model: Perfil, as: "perfil" },
+        { model: Perfil, as: "perfis_extra" },
         { model: Organizacao, as: "organizacao" },
       ],
     });
@@ -197,7 +239,7 @@ var register = async function (req, res) {
     return res.status(201).json({
       mensagem: "Utilizador criado com sucesso",
       token: token,
-      utilizador: completo.toJSON(),
+      utilizador: serializarUtilizador(completo),
     });
   } catch (e) {
     console.log("Erro no register:", e.message);
@@ -208,7 +250,7 @@ var register = async function (req, res) {
 var getProfile = async function (req, res) {
   try {
     return res.status(200).json({
-      utilizador: req.utilizador.toJSON(),
+      utilizador: serializarUtilizador(req.utilizador),
     });
   } catch (e) {
     return res.status(500).json({ error: "Erro interno do servidor" });

@@ -1,0 +1,25 @@
+
+> sistema_recursos_humanos_back@1.0.0 start
+> node index.js
+
+◇ injected env (9) from .env // tip: ⌘ override existing { override: true }
+◇ injected env (0) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+=================================
+ SGHR v1.0.0 - CENFFOR
+ Server on porta 8080
+=================================
+ Conectado com sucesso ao banco!
+ A executar migracoes da base de dados...
+ Tabelas sincronizadas.
+ Tabela 'utilizadores_perfis' garantida!
+ Coluna 'permissoes' de perfis convertida para JSON!
+ Tabela 'ocorrencias_disciplinares' garantida!
+ Coluna 'nome_completo' alterada em colaboradores!
+ Coluna 'funcao' alterada em seccoes_colaboradores!
+ Migracoes concluidas com sucesso!
+ conexao com BD estabelecida!
+ a verificar colunas na BD...
+ Coluna 'nome_completo' alterada para NULL!
+ Coluna 'funcao' de seccoes_colaboradores alterada para texto livre!
+ A sincronizar dados iniciais...
+ Seed concluido com sucesso!

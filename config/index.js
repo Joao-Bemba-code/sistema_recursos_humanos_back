@@ -1,20 +1,15 @@
 var dotenv = require('dotenv');
 dotenv.config({path: __dirname + '/../.env'});
 
-var {Name_database, User_database, Pass_database, Host_database, Port_database, Lang_database} = process.env;
+var {Name_database, User_database, Pass_database, Host_database, Port_database, Lang_database, SSL_database} = process.env;
 
 var Sequelize = require('sequelize');
 
-var sequelize = new Sequelize(Name_database, User_database, Pass_database, {
+var sslEnabled = String(SSL_database).toLowerCase() === 'true';
+var sequelizeOptions = {
     host: Host_database,
     dialect: Lang_database,
     port: parseInt(Port_database) || 4076,
-    dialectOptions: {
-        ssl: {
-            require: true,
-            rejectUnauthorized: false
-        }
-    },
     connectTimeout: 60000,
     pool: {
         max: 5,
@@ -33,7 +28,17 @@ var sequelize = new Sequelize(Name_database, User_database, Pass_database, {
         max: 3
     },
     logging: false
-});
+};
+if (sslEnabled) {
+    sequelizeOptions.dialectOptions = {
+        ssl: {
+            require: true,
+            rejectUnauthorized: false
+        }
+    };
+}
+
+var sequelize = new Sequelize(Name_database, User_database, Pass_database, sequelizeOptions);
 
 sequelize.authenticate()
     .then(() => {

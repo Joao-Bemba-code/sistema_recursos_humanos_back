@@ -1,0 +1,102 @@
+
+> sistema_recursos_humanos_back@1.0.0 start
+> node index.js
+
+◇ injected env (9) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+=================================
+ SGHR v1.0.0 - CENFFOR
+ Server on porta 8080
+=================================
+ Conectado com sucesso ao banco!
+ A executar migracoes da base de dados...
+ Tabelas sincronizadas.
+ Tabela 'utilizadores_perfis' garantida!
+ Coluna 'permissoes' de perfis convertida para JSON!
+ Tabela 'ocorrencias_disciplinares' garantida!
+ Coluna 'nome_completo' alterada em colaboradores!
+ Coluna 'funcao' alterada em seccoes_colaboradores!
+ Migracoes concluidas com sucesso!
+ conexao com BD estabelecida!
+ a verificar colunas na BD...
+ Coluna 'nome_completo' alterada para NULL!
+ Coluna 'funcao' de seccoes_colaboradores alterada para texto livre!
+ A sincronizar dados iniciais...
+ Seed concluido com sucesso!
+ POST /api/auth/login
+Rota não encontrada: POST /api/auth/login
+[0mPOST /api/auth/login [33m404[0m 3.614 ms - 32[0m
+ POST /auth/login
+[0mPOST /auth/login [32m200[0m 376.478 ms - 10516[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 17.827 ms - -[0m
+ POST /auth/login
+[0mPOST /auth/login [32m200[0m 344.552 ms - 10516[0m
+ GET /api/users?limit=50
+[0mGET /api/users?limit=50 [32m200[0m 40.047 ms - 5869[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 10.451 ms - -[0m
+ POST /auth/login
+[0mPOST /auth/login [32m200[0m 314.346 ms - 10516[0m
+ GET /api/users?limit=50&search=Esperan
+[0mGET /api/users?limit=50&search=Esperan [32m200[0m 15.384 ms - 843[0m
+ GET /api/users/c61af61a-e80c-4073-add5-5ea986584e5c
+[0mGET /api/users/c61af61a-e80c-4073-add5-5ea986584e5c [32m200[0m 14.941 ms - 1298[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 7.857 ms - -[0m
+ POST /auth/login
+[0mPOST /auth/login [32m200[0m 317.553 ms - 10516[0m
+ GET /api/perfis
+[0mGET /api/perfis [32m200[0m 38.838 ms - 5090[0m
+ PUT /api/users/55b8eaac-5913-4011-8428-6b63aa1715a8
+[0mPUT /api/users/55b8eaac-5913-4011-8428-6b63aa1715a8 [33m404[0m 7.942 ms - 38[0m
+ GET /api/users/55b8eaac-5913-4011-8428-6b63aa1715a8
+[0mGET /api/users/55b8eaac-5913-4011-8428-6b63aa1715a8 [33m404[0m 13.004 ms - 38[0m
+ POST /auth/login
+[0mPOST /auth/login [32m200[0m 329.241 ms - 10516[0m
+ GET /api/users?limit=50&search=Esperan
+[0mGET /api/users?limit=50&search=Esperan [32m200[0m 12.996 ms - 843[0m
+ GET /api/perfis
+[0mGET /api/perfis [32m200[0m 27.457 ms - 5090[0m
+ PUT /api/users/c61af61a-e80c-4073-add5-5ea986584e5c
+[0mPUT /api/users/c61af61a-e80c-4073-add5-5ea986584e5c [31m500[0m 7.366 ms - 36[0m
+ GET /api/users/c61af61a-e80c-4073-add5-5ea986584e5c
+[0mGET /api/users/c61af61a-e80c-4073-add5-5ea986584e5c [32m200[0m 11.685 ms - 1298[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 9.355 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.994 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.763 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 12.144 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 10.273 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.595 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 9.324 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.587 ms - -[0m
+ POST /auth/login
+[0mPOST /auth/login [32m200[0m 338.018 ms - 10516[0m
+ GET /api/users?limit=50&search=TITO
+[0mGET /api/users?limit=50&search=TITO [32m200[0m 10.786 ms - 624[0m
+ GET /api/users/c61af61a-e80c-4073-add5-5ea986584e5c
+[0mGET /api/users/c61af61a-e80c-4073-add5-5ea986584e5c [32m200[0m 8.545 ms - 1463[0m
+ GET /api/perfis
+[0mGET /api/perfis [32m200[0m 39.064 ms - 5090[0m
+ PUT /api/users/c61af61a-e80c-4073-add5-5ea986584e5c
+[0mPUT /api/users/c61af61a-e80c-4073-add5-5ea986584e5c [31m500[0m 6.414 ms - 36[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 9.882 ms - -[0m
+ GET /api/perfis
+ GET /api/users?page=1&limit=15
+[0mGET /api/perfis [32m200[0m 101.145 ms - 5090[0m
+[0mGET /api/users?page=1&limit=15 [32m200[0m 94.402 ms - 5946[0m
+ GET /api/perfis
+ GET /api/users?page=1&limit=15
+[0mGET /api/users?page=1&limit=15 [36m304[0m 54.243 ms - -[0m
+[0mGET /api/perfis [36m304[0m 85.776 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 7.821 ms - -[0m

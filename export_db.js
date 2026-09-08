@@ -2,19 +2,21 @@ var dotenv = require('dotenv');
 dotenv.config({path: __dirname + '/.env'});
 
 var fs = require('fs');
-var {Name_database, User_database, Pass_database, Host_database, Lang_database} = process.env;
+var {Name_database, User_database, Pass_database, Host_database, Lang_database, Port_database, SSL_database} = process.env;
 var Sequelize = require('sequelize');
 
-var sequelize = new Sequelize(Name_database, User_database, Pass_database, {
+var sslEnabled = String(SSL_database).toLowerCase() === 'true';
+var sequelizeOptions = {
     host: Host_database,
     dialect: Lang_database,
-    port: 4076,
-    dialectOptions: {
-        ssl: { require: true, rejectUnauthorized: false }
-    },
+    port: parseInt(Port_database) || 3306,
     connectTimeout: 60000,
     logging: false
-});
+};
+if (sslEnabled) {
+    sequelizeOptions.dialectOptions = { ssl: { require: true, rejectUnauthorized: false } };
+}
+var sequelize = new Sequelize(Name_database, User_database, Pass_database, sequelizeOptions);
 
 function escapeValue(val) {
     if (val === null || val === undefined) return 'NULL';

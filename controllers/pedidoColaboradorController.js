@@ -162,6 +162,7 @@ var create = async function (req, res) {
             mensagem: colaborador.nome_completo + " submeteu um pedido de " + (tipoLabels[pedido.tipo] || pedido.tipo) + ": " + pedido.titulo,
             tipo: "info",
             link: "/dashboard/pedidos",
+            modulo: "pedidos",
           });
         }
       }
@@ -263,6 +264,7 @@ var updateEstado = async function (req, res) {
         mensagem: mensagemNotificacao,
         tipo: tipoNotificacao,
         link: "/dashboard/portal",
+        modulo: "pedidos",
       });
       console.log("Notificacao criada:", !!notifResult);
     } else {

@@ -3,6 +3,7 @@ var { sequelize } = require("../config");
 var Organizacao = require("./Organizacao");
 var Perfil = require("./Perfil");
 var Utilizador = require("./Utilizador");
+var UtilizadorPerfil = require("./UtilizadorPerfil");
 var Colaborador = require("./Colaborador");
 var { Departamento, Cargo } = require("./Estrutura");
 var Seccao = require("./Seccao");
@@ -26,6 +27,22 @@ Utilizador.belongsTo(Organizacao, { foreignKey: "organizacao_id", as: "organizac
 // Perfil -> Utilizadores
 Perfil.hasMany(Utilizador, { foreignKey: "perfil_id", as: "utilizadores" });
 Utilizador.belongsTo(Perfil, { foreignKey: "perfil_id", as: "perfil" });
+
+// Utilizador <-> Perfil (perfis adicionais, muitos-para-muitos)
+Utilizador.belongsToMany(Perfil, {
+  through: { model: UtilizadorPerfil },
+  as: "perfis_extra",
+  foreignKey: "utilizador_id",
+  otherKey: "perfil_id",
+  constraints: false,
+});
+Perfil.belongsToMany(Utilizador, {
+  through: { model: UtilizadorPerfil },
+  as: "utilizadores_extra",
+  foreignKey: "perfil_id",
+  otherKey: "utilizador_id",
+  constraints: false,
+});
 
 // Organizacao -> Colaboradores
 Organizacao.hasMany(Colaborador, { foreignKey: "organizacao_id", as: "colaboradores" });
@@ -307,6 +324,7 @@ module.exports = {
   Organizacao,
   Perfil,
   Utilizador,
+  UtilizadorPerfil,
   Colaborador,
   Departamento,
   Cargo,

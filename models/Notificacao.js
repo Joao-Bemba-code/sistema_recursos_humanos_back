@@ -35,6 +35,10 @@ var Notificacao = sequelize.define("Notificacao", {
     type: DataTypes.STRING(500),
     allowNull: true,
   },
+  modulo: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+  },
 }, {
   tableName: "notificacoes",
   timestamps: true,

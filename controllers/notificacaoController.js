@@ -107,6 +107,7 @@ var create = async function (data) {
       tipo: data.tipo || "info",
       lida: false,
       link: data.link || null,
+      modulo: data.modulo || null,
     });
 
     return notificacao;

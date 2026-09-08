@@ -219,6 +219,7 @@ var createAvaliacao = async function (req, res) {
           tipo: "info",
           lida: false,
           link: "/dashboard/portal",
+          modulo: "avaliacao",
         });
       }
     } catch (notifErr) {
@@ -277,6 +278,7 @@ var updateAvaliacao = async function (req, res) {
           tipo: novoEstado === "Validada" ? "success" : "info",
           lida: false,
           link: "/dashboard/portal",
+          modulo: "avaliacao",
         });
       }
     } catch (notifErr) {

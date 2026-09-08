@@ -13,6 +13,7 @@ var { authenticate } = require("./protect/auth");
 
 var authRoutes = require("./routers/auth");
 var userRoutes = require("./routers/users");
+var perfilRoutes = require("./routers/perfis");
 var organizacaoRoutes = require("./routers/organizacoes");
 var colaboradorRoutes = require("./routers/colaboradores");
 var departamentoRoutes = require("./routers/departamentos");
@@ -29,8 +30,10 @@ var pedidoRoutes = require("./routers/pedidos");
 var portalRoutes = require("./routers/portal");
 var faltasRoutes = require("./routers/faltas");
 var pdfRoutes = require("./routers/pdf");
+var ocorrenciaRoutes = require("./routers/ocorrencias");
 
 var seed = require("./seed");
+var migrations = require("./migrations");
 var { sequelize, syncDatabase } = require("./models");
 
 process.on("unhandledRejection", function (err) {
@@ -85,6 +88,7 @@ app.use("/auth", authRoutes);
 
 // Rotas protegidas
 app.use("/api/users", authenticate, userRoutes);
+app.use("/api/perfis", authenticate, perfilRoutes);
 app.use("/api/organizacoes", authenticate, organizacaoRoutes);
 app.use("/api/colaboradores", authenticate, colaboradorRoutes);
 app.use("/api/departamentos", authenticate, departamentoRoutes);
@@ -101,6 +105,7 @@ app.use("/api/pedidos", authenticate, pedidoRoutes);
 app.use("/api/portal", authenticate, portalRoutes);
 app.use("/api/faltas", authenticate, faltasRoutes);
 app.use("/api/pdf", authenticate, pdfRoutes);
+app.use("/api/ocorrencias", authenticate, ocorrenciaRoutes);
 
 // Health check
 app.get("/health", function (req, res) {
@@ -142,6 +147,7 @@ app.listen(port, async function () {
   console.log("=================================");
 
   try {
+    await migrations();
     await syncDatabase();
     await seed();
   } catch (e) {

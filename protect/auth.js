@@ -1,5 +1,6 @@
 var jwt = require("jsonwebtoken");
 var { Utilizador, Perfil, Organizacao } = require("../models");
+var { prepararUtilizador } = require("./rbac");
 
 var authenticate = async (req, res, next) => {
   try {
@@ -22,6 +23,7 @@ var authenticate = async (req, res, next) => {
     var utilizador = await Utilizador.findByPk(decoded.id, {
       include: [
         { model: Perfil, as: "perfil" },
+        { model: Perfil, as: "perfis_extra" },
         { model: Organizacao, as: "organizacao" },
       ],
     });
@@ -37,6 +39,8 @@ var authenticate = async (req, res, next) => {
     if (utilizador.bloqueado) {
       return res.status(403).json({ error: "Conta bloqueada. Contacte o administrador." });
     }
+
+    prepararUtilizador(utilizador);
 
     req.utilizador = utilizador;
     req.organizacao_id = utilizador.organizacao_id;
@@ -60,9 +64,11 @@ var authenticateOptional = async (req, res, next) => {
       var utilizador = await Utilizador.findByPk(decoded.id, {
         include: [
           { model: Perfil, as: "perfil" },
+          { model: Perfil, as: "perfis_extra" },
           { model: Organizacao, as: "organizacao" },
         ],
       });
+      if (utilizador) prepararUtilizador(utilizador);
       req.utilizador = utilizador || null;
       req.organizacao_id = utilizador ? utilizador.organizacao_id : null;
     } catch (e) {

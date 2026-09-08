@@ -1,7 +1,6 @@
 var dotenv = require('dotenv');
 dotenv.config({path: __dirname + '/.env'});
 
-var bcrypt = require('bcryptjs');
 var {Name_database, User_database, Pass_database, Host_database, Lang_database, Port_database, SSL_database} = process.env;
 
 var Sequelize = require('sequelize');
@@ -24,24 +23,16 @@ var sequelize = new Sequelize(Name_database, User_database, Pass_database, seque
         await sequelize.authenticate();
         console.log("Conectado a BD!");
 
-        var novaSenha = 'admin123';
-        var salt = await bcrypt.genSalt(12);
-        var hashedPassword = await bcrypt.hash(novaSenha, salt);
-
         await sequelize.query(
-            "UPDATE utilizadores SET password = :password, must_change_password = true WHERE email = :email",
-            {
-                replacements: { password: hashedPassword, email: 'admin@cenffor.co.ao' }
-            }
+            "UPDATE utilizadores SET bloqueado = false, tentativas_login = 0 WHERE username = 'admin'"
         );
-        console.log("Senha do utilizador admin@cenffor.co.ao atualizada com sucesso!");
+        console.log("Utilizador 'admin' desbloqueado com sucesso!");
 
         var check = await sequelize.query(
-            "SELECT username, email, must_change_password FROM utilizadores WHERE email = :email",
-            { replacements: { email: 'admin@cenffor.co.ao' } }
+            "SELECT username, bloqueado, tentativas_login FROM utilizadores WHERE username = 'admin'"
         );
         var row = Array.isArray(check[0]) ? check[0][0] : check[0];
-        console.log(`Verificacao - ${row.username} | ${row.email} | must_change_password: ${row.must_change_password}`);
+        console.log(`Verificacao - ${row.username} | bloqueado: ${row.bloqueado} | tentativas: ${row.tentativas_login}`);
 
         await sequelize.close();
     } catch (e) {
