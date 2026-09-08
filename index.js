@@ -110,7 +110,7 @@ app.use("/api/folha-salarial", authenticate, folhaSalarialRoutes);
 app.use("/api/notificacoes", authenticate, notificacaoRoutes);
 app.use("/api/pedidos", authenticate, pedidoRoutes);
 app.use("/api/portal", authenticate, portalRoutes);
-2app.use("/api/faltas", authenticate, faltasRoutes);
+app.use("/api/faltas", authenticate, faltasRoutes);
 app.use("/api/pdf", authenticate, pdfRoutes);
 app.use("/api/ocorrencias", authenticate, ocorrenciaRoutes);
 
