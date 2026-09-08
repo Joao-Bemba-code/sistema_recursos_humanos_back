@@ -23,3 +23,399 @@
  Coluna 'funcao' de seccoes_colaboradores alterada para texto livre!
  A sincronizar dados iniciais...
  Seed concluido com sucesso!
+ POST /auth/login
+[0mPOST /auth/login [33m401[0m 32.320 ms - 34[0m
+ POST /auth/login
+[0mPOST /auth/login [32m200[0m 395.075 ms - 10516[0m
+ POST /api/ocorrencias
+[0mPOST /api/ocorrencias [32m201[0m 34.808 ms - 664[0m
+ POST /auth/login
+[0mPOST /auth/login [32m200[0m 351.978 ms - 11246[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [32m200[0m 13.069 ms - 538[0m
+ DELETE /api/ocorrencias/cbb8f6c9-6dd3-40cc-981c-3913e38c10b7
+[0mDELETE /api/ocorrencias/cbb8f6c9-6dd3-40cc-981c-3913e38c10b7 [32m200[0m 12.109 ms - 48[0m
+ POST /auth/login
+[0mPOST /auth/login [32m200[0m 379.981 ms - 10516[0m
+ GET /api/notificacoes
+ GET /api/colaboradores?limit=1
+ GET /api/contratos?limit=1&estado=Activo
+ GET /api/departamentos?limit=1
+ GET /api/ferias?limit=1
+ GET /api/departamentos?limit=100
+[0mGET /api/colaboradores?limit=1 [32m200[0m 160.110 ms - 1216[0m
+[0mGET /api/contratos?limit=1&estado=Activo [36m304[0m 161.920 ms - -[0m
+[0mGET /api/notificacoes [32m200[0m 190.201 ms - 6315[0m
+[0mGET /api/departamentos?limit=1 [36m304[0m 138.488 ms - -[0m
+ GET /api/contratos?limit=100
+ GET /api/colaboradores?limit=1
+[0mGET /api/departamentos?limit=100 [36m304[0m 132.654 ms - -[0m
+ GET /api/contratos?limit=1&estado=Activo
+[0mGET /api/ferias?limit=1 [36m304[0m 147.343 ms - -[0m
+ GET /api/notificacoes
+ GET /api/departamentos?limit=1
+ GET /api/departamentos?limit=100
+[0mGET /api/contratos?limit=100 [36m304[0m 92.580 ms - -[0m
+[0mGET /api/colaboradores?limit=1 [36m304[0m 92.280 ms - -[0m
+[0mGET /api/departamentos?limit=1 [36m304[0m 88.707 ms - -[0m
+[0mGET /api/contratos?limit=1&estado=Activo [36m304[0m 137.835 ms - -[0m
+ GET /api/ferias?limit=1
+ GET /api/contratos?limit=100
+[0mGET /api/departamentos?limit=100 [36m304[0m 93.312 ms - -[0m
+[0mGET /api/notificacoes [36m304[0m 140.990 ms - -[0m
+[0mGET /api/ferias?limit=1 [36m304[0m 26.577 ms - -[0m
+[0mGET /api/contratos?limit=100 [36m304[0m 26.560 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 10.445 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 8.458 ms - -[0m
+ POST /auth/login
+[0mPOST /auth/login [32m200[0m 349.768 ms - 11246[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [32m200[0m 24.246 ms - 3063[0m
+ GET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026
+[0mGET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026 [32m200[0m 7.763 ms - 76[0m
+ GET /api/pdf/resumo-pagamentos?mes=3&ano=2020
+[0mGET /api/pdf/resumo-pagamentos?mes=3&ano=2020 [33m404[0m 5.991 ms - 63[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 20.106 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 9.946 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 8.387 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 8.360 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 26.007 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 16.572 ms - -[0m
+ GET /api/perfis
+ GET /api/users?page=1&limit=15
+[0mGET /api/users?page=1&limit=15 [32m200[0m 110.450 ms - 6022[0m
+ GET /api/users?page=1&limit=15
+[0mGET /api/perfis [36m304[0m 129.408 ms - -[0m
+ GET /api/perfis
+[0mGET /api/users?page=1&limit=15 [36m304[0m 26.213 ms - -[0m
+[0mGET /api/perfis [36m304[0m 43.722 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 9.144 ms - -[0m
+ PUT /api/perfis/d4cf8310-4ffe-439c-bbd8-b892f456b5ad
+[0mPUT /api/perfis/d4cf8310-4ffe-439c-bbd8-b892f456b5ad [32m200[0m 11.703 ms - 431[0m
+ GET /api/perfis
+[0mGET /api/perfis [32m200[0m 58.161 ms - 5163[0m
+ GET /api/users?page=1&limit=15
+[0mGET /api/users?page=1&limit=15 [36m304[0m 21.062 ms - -[0m
+ GET /api/users?page=1&limit=15
+[0mGET /api/users?page=1&limit=15 [36m304[0m 8.762 ms - -[0m
+ POST /auth/login
+[0mPOST /auth/login [32m200[0m 362.125 ms - 11264[0m
+ GET /api/notificacoes
+ GET /api/colaboradores?limit=1
+ GET /api/ferias?limit=1
+ GET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026
+ GET /api/portal/stats
+[0mGET /api/colaboradores?limit=1 [33m403[0m 30.879 ms - 156[0m
+ GET /api/colaboradores?limit=1
+[0mGET /api/ferias?limit=1 [36m304[0m 48.482 ms - -[0m
+[0mGET /api/notificacoes [32m200[0m 63.444 ms - 91[0m
+[0mGET /api/colaboradores?limit=1 [33m403[0m 11.102 ms - 156[0m
+[0mGET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026 [36m304[0m 42.028 ms - -[0m
+ GET /api/ferias?limit=1
+ GET /api/notificacoes
+ GET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026
+[0mGET /api/ferias?limit=1 [36m304[0m 24.965 ms - -[0m
+[0mGET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026 [36m304[0m 22.218 ms - -[0m
+[0mGET /api/notificacoes [36m304[0m 27.413 ms - -[0m
+[0mGET /api/portal/stats [36m304[0m 86.581 ms - -[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 26.583 ms - -[0m
+ GET /api/colaboradores?page=1&limit=15
+[0mGET /api/colaboradores?page=1&limit=15 [33m403[0m 6.465 ms - 156[0m
+ GET /api/colaboradores?page=1&limit=15
+[0mGET /api/colaboradores?page=1&limit=15 [33m403[0m 7.715 ms - 156[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 31.543 ms - -[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 19.882 ms - -[0m
+ GET /api/portal/stats
+ GET /api/colaboradores?limit=1
+ GET /api/ferias?limit=1
+ GET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026
+[0mGET /api/colaboradores?limit=1 [33m403[0m 20.905 ms - 156[0m
+ GET /api/colaboradores?limit=1
+[0mGET /api/ferias?limit=1 [36m304[0m 31.215 ms - -[0m
+[0mGET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026 [36m304[0m 27.566 ms - -[0m
+[0mGET /api/colaboradores?limit=1 [33m403[0m 7.974 ms - 156[0m
+ GET /api/ferias?limit=1
+ GET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026
+[0mGET /api/ferias?limit=1 [36m304[0m 19.499 ms - -[0m
+[0mGET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026 [36m304[0m 15.917 ms - -[0m
+[0mGET /api/portal/stats [36m304[0m 85.830 ms - -[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 24.106 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.422 ms - -[0m
+ GET /api/colaboradores?page=1&limit=15
+[0mGET /api/colaboradores?page=1&limit=15 [33m403[0m 8.657 ms - 156[0m
+ GET /api/colaboradores?page=1&limit=15
+[0mGET /api/colaboradores?page=1&limit=15 [33m403[0m 10.991 ms - 156[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 7.374 ms - -[0m
+ GET /api/colaboradores?limit=1
+ GET /api/ferias?limit=1
+ GET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026
+ GET /api/portal/stats
+[0mGET /api/colaboradores?limit=1 [33m403[0m 27.604 ms - 156[0m
+ GET /api/colaboradores?limit=1
+[0mGET /api/ferias?limit=1 [36m304[0m 44.847 ms - -[0m
+[0mGET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026 [36m304[0m 42.992 ms - -[0m
+[0mGET /api/colaboradores?limit=1 [33m403[0m 13.097 ms - 156[0m
+ GET /api/ferias?limit=1
+ GET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026
+[0mGET /api/ferias?limit=1 [36m304[0m 24.193 ms - -[0m
+[0mGET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026 [36m304[0m 18.137 ms - -[0m
+[0mGET /api/portal/stats [36m304[0m 96.147 ms - -[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 31.535 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 7.502 ms - -[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 28.429 ms - -[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 21.054 ms - -[0m
+ GET /api/portal/stats
+ GET /api/colaboradores?limit=1
+ GET /api/ferias?limit=1
+ GET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026
+[0mGET /api/colaboradores?limit=1 [33m403[0m 14.187 ms - 156[0m
+ GET /api/colaboradores?limit=1
+[0mGET /api/ferias?limit=1 [36m304[0m 25.437 ms - -[0m
+[0mGET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026 [36m304[0m 21.267 ms - -[0m
+[0mGET /api/colaboradores?limit=1 [33m403[0m 8.850 ms - 156[0m
+ GET /api/ferias?limit=1
+ GET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026
+[0mGET /api/ferias?limit=1 [36m304[0m 18.728 ms - -[0m
+[0mGET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026 [36m304[0m 16.124 ms - -[0m
+[0mGET /api/portal/stats [36m304[0m 77.054 ms - -[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 26.657 ms - -[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 28.002 ms - -[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 19.044 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.794 ms - -[0m
+ GET /api/colaboradores?limit=1
+ GET /api/ferias?limit=1
+ GET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026
+ GET /api/portal/stats
+[0mGET /api/colaboradores?limit=1 [33m403[0m 16.451 ms - 156[0m
+ GET /api/colaboradores?limit=1
+[0mGET /api/ferias?limit=1 [36m304[0m 31.612 ms - -[0m
+[0mGET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026 [36m304[0m 27.483 ms - -[0m
+[0mGET /api/colaboradores?limit=1 [33m403[0m 12.751 ms - 156[0m
+ GET /api/ferias?limit=1
+ GET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026
+[0mGET /api/ferias?limit=1 [36m304[0m 20.371 ms - -[0m
+[0mGET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026 [36m304[0m 16.591 ms - -[0m
+[0mGET /api/portal/stats [36m304[0m 66.917 ms - -[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 45.206 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.948 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.304 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 7.390 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 7.127 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 8.109 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.132 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.737 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 7.724 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.404 ms - -[0m
+ POST /auth/login
+[0mPOST /auth/login [32m200[0m 340.541 ms - 10516[0m
+ GET /api/notificacoes
+ GET /api/colaboradores?limit=1
+ GET /api/contratos?limit=1&estado=Activo
+ GET /api/departamentos?limit=1
+ GET /api/ferias?limit=1
+ GET /api/departamentos?limit=100
+[0mGET /api/colaboradores?limit=1 [32m200[0m 67.754 ms - 1216[0m
+[0mGET /api/contratos?limit=1&estado=Activo [36m304[0m 65.930 ms - -[0m
+[0mGET /api/departamentos?limit=1 [36m304[0m 64.763 ms - -[0m
+[0mGET /api/notificacoes [32m200[0m 87.593 ms - 6315[0m
+ GET /api/contratos?limit=100
+ GET /api/colaboradores?limit=1
+[0mGET /api/ferias?limit=1 [36m304[0m 64.818 ms - -[0m
+[0mGET /api/departamentos?limit=100 [36m304[0m 63.205 ms - -[0m
+ GET /api/contratos?limit=1&estado=Activo
+ GET /api/departamentos?limit=1
+ GET /api/notificacoes
+ GET /api/ferias?limit=1
+[0mGET /api/contratos?limit=100 [36m304[0m 62.720 ms - -[0m
+[0mGET /api/departamentos?limit=1 [36m304[0m 63.228 ms - -[0m
+[0mGET /api/colaboradores?limit=1 [36m304[0m 79.449 ms - -[0m
+ GET /api/departamentos?limit=100
+[0mGET /api/contratos?limit=1&estado=Activo [36m304[0m 78.093 ms - -[0m
+ GET /api/contratos?limit=100
+[0mGET /api/ferias?limit=1 [36m304[0m 59.707 ms - -[0m
+[0mGET /api/notificacoes [36m304[0m 67.564 ms - -[0m
+[0mGET /api/departamentos?limit=100 [36m304[0m 25.981 ms - -[0m
+[0mGET /api/contratos?limit=100 [36m304[0m 22.328 ms - -[0m
+ GET /api/colaboradores?page=1&limit=15
+[0mGET /api/colaboradores?page=1&limit=15 [32m200[0m 18.532 ms - 15135[0m
+ GET /api/colaboradores?page=1&limit=15
+[0mGET /api/colaboradores?page=1&limit=15 [36m304[0m 15.792 ms - -[0m
+ GET /api/avaliacao/avaliacoes?colaborador_id=75717e7a-88f3-4f5a-bc50-e3c746e39533&limit=100
+[0mGET /api/avaliacao/avaliacoes?colaborador_id=75717e7a-88f3-4f5a-bc50-e3c746e39533&limit=100 [32m200[0m 7.909 ms - 78[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 7.765 ms - -[0m
+ GET /api/avaliacao/avaliacoes?colaborador_id=75717e7a-88f3-4f5a-bc50-e3c746e39533&limit=100
+[0mGET /api/avaliacao/avaliacoes?colaborador_id=75717e7a-88f3-4f5a-bc50-e3c746e39533&limit=100 [36m304[0m 16.681 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 16.066 ms - -[0m
+ GET /api/avaliacao/avaliacoes?colaborador_id=4f0014fa-075e-451d-8e1e-4ced09934c29&limit=100
+[0mGET /api/avaliacao/avaliacoes?colaborador_id=4f0014fa-075e-451d-8e1e-4ced09934c29&limit=100 [32m200[0m 7.290 ms - 78[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 7.089 ms - -[0m
+ GET /api/colaboradores?limit=200
+ GET /api/contratos?page=1&limit=15
+[0mGET /api/colaboradores?limit=200 [36m304[0m 29.239 ms - -[0m
+[0mGET /api/contratos?page=1&limit=15 [36m304[0m 25.796 ms - -[0m
+ GET /api/colaboradores?limit=200
+ GET /api/contratos?page=1&limit=15
+[0mGET /api/colaboradores?limit=200 [36m304[0m 23.647 ms - -[0m
+[0mGET /api/contratos?page=1&limit=15 [36m304[0m 20.768 ms - -[0m
+ GET /api/colaboradores?page=1&limit=15
+[0mGET /api/colaboradores?page=1&limit=15 [36m304[0m 14.370 ms - -[0m
+ GET /api/colaboradores?page=1&limit=15
+[0mGET /api/colaboradores?page=1&limit=15 [36m304[0m 13.366 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 9.293 ms - -[0m
+ GET /api/avaliacao/avaliacoes?colaborador_id=c5648a59-ed39-4d13-94e9-cc883250930d&limit=100
+[0mGET /api/avaliacao/avaliacoes?colaborador_id=c5648a59-ed39-4d13-94e9-cc883250930d&limit=100 [32m200[0m 5.616 ms - 78[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 8.157 ms - -[0m
+ GET /api/avaliacao/avaliacoes?colaborador_id=75717e7a-88f3-4f5a-bc50-e3c746e39533&limit=100
+[0mGET /api/avaliacao/avaliacoes?colaborador_id=75717e7a-88f3-4f5a-bc50-e3c746e39533&limit=100 [36m304[0m 6.827 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.599 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.957 ms - -[0m
+ POST /auth/login
+[0mPOST /auth/login [33m401[0m 365.600 ms - 53[0m
+ POST /auth/login
+[0mPOST /auth/login [33m401[0m 348.248 ms - 53[0m
+ POST /auth/login
+[0mPOST /auth/login [33m401[0m 333.866 ms - 53[0m
+ POST /auth/login
+[0mPOST /auth/login [32m200[0m 353.472 ms - 10516[0m
+ GET /api/notificacoes
+ GET /api/colaboradores?limit=1
+ GET /api/contratos?limit=1&estado=Activo
+ GET /api/departamentos?limit=1
+ GET /api/ferias?limit=1
+ GET /api/departamentos?limit=100
+[0mGET /api/colaboradores?limit=1 [36m304[0m 95.332 ms - -[0m
+[0mGET /api/contratos?limit=1&estado=Activo [36m304[0m 92.866 ms - -[0m
+[0mGET /api/notificacoes [36m304[0m 114.352 ms - -[0m
+ GET /api/contratos?limit=100
+ GET /api/colaboradores?limit=1
+[0mGET /api/ferias?limit=1 [36m304[0m 75.706 ms - -[0m
+ GET /api/contratos?limit=1&estado=Activo
+[0mGET /api/departamentos?limit=1 [36m304[0m 101.030 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/departamentos?limit=100 [36m304[0m 71.738 ms - -[0m
+[0mGET /api/colaboradores?limit=1 [36m304[0m 52.724 ms - -[0m
+ GET /api/ferias?limit=1
+[0mGET /api/contratos?limit=100 [36m304[0m 64.054 ms - -[0m
+ GET /api/departamentos?limit=1
+[0mGET /api/contratos?limit=1&estado=Activo [36m304[0m 49.225 ms - -[0m
+ GET /api/departamentos?limit=100
+ GET /api/contratos?limit=100
+[0mGET /api/ferias?limit=1 [36m304[0m 37.384 ms - -[0m
+[0mGET /api/departamentos?limit=1 [36m304[0m 42.165 ms - -[0m
+[0mGET /api/departamentos?limit=100 [36m304[0m 36.747 ms - -[0m
+[0mGET /api/notificacoes [36m304[0m 75.471 ms - -[0m
+[0mGET /api/contratos?limit=100 [36m304[0m 36.486 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.903 ms - -[0m
+ GET /api/colaboradores?limit=200
+ GET /api/ocorrencias?page=1&limit=15
+[0mGET /api/colaboradores?limit=200 [36m304[0m 22.002 ms - -[0m
+[0mGET /api/ocorrencias?page=1&limit=15 [36m304[0m 23.574 ms - -[0m
+ GET /api/colaboradores?limit=200
+ GET /api/ocorrencias?page=1&limit=15
+[0mGET /api/colaboradores?limit=200 [36m304[0m 17.277 ms - -[0m
+[0mGET /api/ocorrencias?page=1&limit=15 [36m304[0m 15.844 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 7.961 ms - -[0m
+ POST /api/ocorrencias
+[0mPOST /api/ocorrencias [32m201[0m 23.142 ms - 650[0m
+ GET /api/ocorrencias?page=1&limit=15
+[0mGET /api/ocorrencias?page=1&limit=15 [32m200[0m 11.572 ms - 2442[0m
+ GET /api/ocorrencias?page=1&limit=15
+[0mGET /api/ocorrencias?page=1&limit=15 [36m304[0m 10.914 ms - -[0m
+ GET /api/ocorrencias?page=1&limit=15
+[0mGET /api/ocorrencias?page=1&limit=15 [36m304[0m 9.393 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 8.025 ms - -[0m
+ PUT /api/ocorrencias/a90f6e09-2315-42a9-b3c4-218525cbdd67
+[0mPUT /api/ocorrencias/a90f6e09-2315-42a9-b3c4-218525cbdd67 [32m200[0m 26.040 ms - 652[0m
+ GET /api/ocorrencias?page=1&limit=15
+[0mGET /api/ocorrencias?page=1&limit=15 [32m200[0m 12.436 ms - 2442[0m
+ GET /api/ocorrencias?page=1&limit=15
+[0mGET /api/ocorrencias?page=1&limit=15 [36m304[0m 17.885 ms - -[0m
+ POST /auth/login
+[0mPOST /auth/login [32m200[0m 292.001 ms - 11264[0m
+ GET /api/notificacoes
+ GET /api/colaboradores?limit=1
+ GET /api/ferias?limit=1
+ GET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026
+ GET /api/portal/stats
+[0mGET /api/colaboradores?limit=1 [33m403[0m 33.177 ms - 156[0m
+ GET /api/colaboradores?limit=1
+[0mGET /api/ferias?limit=1 [36m304[0m 52.009 ms - -[0m
+[0mGET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026 [36m304[0m 46.845 ms - -[0m
+[0mGET /api/notificacoes [32m200[0m 66.053 ms - 514[0m
+[0mGET /api/colaboradores?limit=1 [33m403[0m 11.152 ms - 156[0m
+ GET /api/ferias?limit=1
+ GET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026
+ GET /api/notificacoes
+[0mGET /api/ferias?limit=1 [36m304[0m 29.875 ms - -[0m
+[0mGET /api/folha-salarial/pagamentos?limit=1&mes=9&ano=2026 [36m304[0m 26.418 ms - -[0m
+[0mGET /api/notificacoes [36m304[0m 24.387 ms - -[0m
+[0mGET /api/portal/stats [36m304[0m 90.454 ms - -[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 24.745 ms - -[0m
+ PUT /api/notificacoes/b04c80e7-7849-47a8-b7d1-e1db8b211870/read
+[0mPUT /api/notificacoes/b04c80e7-7849-47a8-b7d1-e1db8b211870/read [32m200[0m 17.775 ms - 475[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 22.766 ms - -[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 19.332 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [32m200[0m 9.587 ms - 513[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 7.643 ms - -[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 16.819 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.525 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 9.756 ms - -[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 15.584 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 8.819 ms - -[0m
+ GET /api/notificacoes
+[0mGET /api/notificacoes [36m304[0m 6.366 ms - -[0m
+ GET /api/portal/stats
+[0mGET /api/portal/stats [36m304[0m 16.616 ms - -[0m
