@@ -1,4 +1,4 @@
-var { Colaborador, Ferias, SolicitacaoFerias, AvaliacaoDesempenho, CicloAvaliacao, PedidoColaborador, RegistoPresenca, Contrato } = require("../models");
+var { Colaborador, Ferias, SolicitacaoFerias, AvaliacaoDesempenho, CicloAvaliacao, PedidoColaborador, RegistoPresenca, Contrato, Pagamento } = require("../models");
 var { Op } = require("sequelize");
 
 var calcularDescontoEstimado = async function (colaborador_id) {
@@ -14,6 +14,30 @@ var calcularDescontoEstimado = async function (colaborador_id) {
 
     if (faltas.length === 0) {
       return { faltas_mes: 0, atrasos_mes: 0, horas_descontar: 0, valor: 0, salario_diario: 0, salario_hora: 0, salario_base: 0 };
+    }
+
+    var mesesFaltas = {};
+    faltas.forEach(function (f) {
+      var data = String(f.data || "");
+      var mes = parseInt(data.substring(5, 7), 10);
+      var ano = parseInt(data.substring(0, 4), 10);
+      if (mes && ano) mesesFaltas[colaborador_id + "|" + mes + "|" + ano] = { mes: mes, ano: ano };
+    });
+    var pares = Object.values(mesesFaltas);
+    var processados = new Set();
+    if (pares.length > 0) {
+      var pagamentos = await Pagamento.findAll({
+        where: {
+          colaborador_id: colaborador_id,
+          [Op.or]: pares.map(function (p) {
+            return { mes: p.mes, ano: p.ano };
+          }),
+        },
+        attributes: ["mes", "ano"],
+      });
+      pagamentos.forEach(function (p) {
+        processados.add(colaborador_id + "|" + p.mes + "|" + p.ano);
+      });
     }
 
     var contrato = await Contrato.findOne({ where: { colaborador_id: colaborador_id, estado: "Activo" } });
@@ -32,6 +56,10 @@ var calcularDescontoEstimado = async function (colaborador_id) {
     var nAtrasos = 0;
 
     faltas.forEach(function (f) {
+      var data = String(f.data || "");
+      var mes = parseInt(data.substring(5, 7), 10);
+      var ano = parseInt(data.substring(0, 4), 10);
+      if (processados.has(colaborador_id + "|" + mes + "|" + ano)) return;
       if (f.estado === "Ausente") {
         horasDescontar += 8;
         nFaltas++;

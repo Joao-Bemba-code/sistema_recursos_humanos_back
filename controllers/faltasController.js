@@ -1,7 +1,42 @@
 var { Op } = require("sequelize");
 var path = require("path");
 var fs = require("fs");
-var { sequelize, RegistoPresenca, Colaborador, Vencimento } = require("../models");
+var { sequelize, RegistoPresenca, Colaborador, Vencimento, Pagamento } = require("../models");
+
+var chaveProcessado = function (colaborador_id, mes, ano) {
+  return colaborador_id + "|" + mes + "|" + ano;
+};
+
+var buscarMesesProcessados = async function (faltas, atrasos) {
+  var chaves = {};
+  var registos = (faltas || []).concat(atrasos || []);
+  registos.forEach(function (r) {
+    var data = String(r.data || "");
+    var mes = parseInt(data.substring(5, 7), 10);
+    var ano = parseInt(data.substring(0, 4), 10);
+    if (mes && ano) {
+      chaves[chaveProcessado(r.colaborador.id, mes, ano)] = { colaborador_id: r.colaborador.id, mes: mes, ano: ano };
+    }
+  });
+
+  var ids = Object.values(chaves);
+  if (ids.length === 0) return new Set();
+
+  var pagamentos = await Pagamento.findAll({
+    where: {
+      [Op.or]: ids.map(function (p) {
+        return { colaborador_id: p.colaborador_id, mes: p.mes, ano: p.ano };
+      }),
+    },
+    attributes: ["colaborador_id", "mes", "ano"],
+  });
+
+  var processados = new Set();
+  pagamentos.forEach(function (p) {
+    processados.add(chaveProcessado(p.colaborador_id, p.mes, p.ano));
+  });
+  return processados;
+};
 
 var resumo = async function (req, res) {
   try {
@@ -45,6 +80,8 @@ var resumo = async function (req, res) {
       attributes: ["id", "nome_completo", "numero_colaborador"],
     });
 
+    var processados = await buscarMesesProcessados(faltas, atrasos);
+
     var resumoColab = {};
     colaboradores.forEach(function (c) {
       resumoColab[c.id] = {
@@ -52,8 +89,12 @@ var resumo = async function (req, res) {
         nome_completo: c.nome_completo,
         numero_colaborador: c.numero_colaborador,
         total_faltas: 0,
+        total_faltas_processadas: 0,
+        total_faltas_pendentes: 0,
         total_faltas_justificadas: 0,
         total_atrasos: 0,
+        total_atrasos_processados: 0,
+        total_atrasos_pendentes: 0,
         total_atrasos_justificados: 0,
         minutos_atraso_total: 0,
         horas_descontar: 0,
@@ -67,11 +108,18 @@ var resumo = async function (req, res) {
     faltas.forEach(function (f) {
       var cid = f.colaborador.id;
       if (!resumoColab[cid]) return;
+      var data = String(f.data || "");
+      var mes = parseInt(data.substring(5, 7), 10);
+      var ano = parseInt(data.substring(0, 4), 10);
+      var jaProcessada = processados.has(chaveProcessado(cid, mes, ano));
       resumoColab[cid].total_faltas++;
       var justificado = f.justificado || false;
       if (justificado) {
         resumoColab[cid].total_faltas_justificadas++;
+      } else if (jaProcessada) {
+        resumoColab[cid].total_faltas_processadas++;
       } else {
+        resumoColab[cid].total_faltas_pendentes++;
         resumoColab[cid].horas_descontar += 8;
         resumoColab[cid].horas_descontar_efectivo += 8;
       }
@@ -82,12 +130,17 @@ var resumo = async function (req, res) {
         justificado: justificado,
         documento_justificacao: f.documento_justificacao,
         justificacao_observacoes: f.justificacao_observacoes,
+        processada: justificado ? false : jaProcessada,
       });
     });
 
     atrasos.forEach(function (a) {
       var cid = a.colaborador.id;
       if (!resumoColab[cid]) return;
+      var data = String(a.data || "");
+      var mes = parseInt(data.substring(5, 7), 10);
+      var ano = parseInt(data.substring(0, 4), 10);
+      var jaProcessada = processados.has(chaveProcessado(cid, mes, ano));
       resumoColab[cid].total_atrasos++;
       var mins = 0;
       if (a.hora_entrada) {
@@ -101,12 +154,14 @@ var resumo = async function (req, res) {
       resumoColab[cid].minutos_atraso_total += mins;
       var horasAtraso = Math.round((mins / 60) * 100) / 100;
       var justificado = a.justificado || false;
-      if (!justificado) {
-        resumoColab[cid].horas_descontar += horasAtraso;
-        resumoColab[cid].horas_descontar_efectivo += horasAtraso;
-      }
       if (justificado) {
         resumoColab[cid].total_atrasos_justificados++;
+      } else if (jaProcessada) {
+        resumoColab[cid].total_atrasos_processados++;
+      } else {
+        resumoColab[cid].total_atrasos_pendentes++;
+        resumoColab[cid].horas_descontar += horasAtraso;
+        resumoColab[cid].horas_descontar_efectivo += horasAtraso;
       }
       resumoColab[cid].atrasos_detalhe.push({
         id: a.id,
@@ -117,6 +172,7 @@ var resumo = async function (req, res) {
         justificado: justificado,
         documento_justificacao: a.documento_justificacao,
         justificacao_observacoes: a.justificacao_observacoes,
+        processada: justificado ? false : jaProcessada,
       });
     });
 
@@ -146,11 +202,19 @@ var resumo = async function (req, res) {
 
     var lista = Object.values(resumoColab);
     var totalGeralFaltas = 0;
+    var totalGeralFaltasPendentes = 0;
+    var totalGeralFaltasProcessadas = 0;
     var totalGeralAtrasos = 0;
+    var totalGeralAtrasosPendentes = 0;
+    var totalGeralAtrasosProcessados = 0;
     var totalGeralDesconto = 0;
     lista.forEach(function (r) {
       totalGeralFaltas += r.total_faltas;
+      totalGeralFaltasPendentes += r.total_faltas_pendentes;
+      totalGeralFaltasProcessadas += r.total_faltas_processadas;
       totalGeralAtrasos += r.total_atrasos;
+      totalGeralAtrasosPendentes += r.total_atrasos_pendentes;
+      totalGeralAtrasosProcessados += r.total_atrasos_processados;
       totalGeralDesconto += r.desconto_previsto;
     });
 
@@ -159,7 +223,11 @@ var resumo = async function (req, res) {
         colaboradores: lista,
         totais: {
           total_faltas: totalGeralFaltas,
+          total_faltas_pendentes: totalGeralFaltasPendentes,
+          total_faltas_processadas: totalGeralFaltasProcessadas,
           total_atrasos: totalGeralAtrasos,
+          total_atrasos_pendentes: totalGeralAtrasosPendentes,
+          total_atrasos_processados: totalGeralAtrasosProcessados,
           total_desconto: Math.round(totalGeralDesconto * 100) / 100,
         },
       },
