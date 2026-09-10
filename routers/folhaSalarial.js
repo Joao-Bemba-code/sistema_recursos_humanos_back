@@ -4,6 +4,7 @@ var controller = require("../controllers/folhaSalarialController");
 var { requireRole } = require("../protect/rbac");
 
 router.get("/contrato-actual/:colaborador_id", controller.getContratoActual);
+router.get("/preview-desconto-faltas", controller.previewDescontoFaltas);
 
 router.get("/vencimentos", controller.listVencimentos);
 router.get("/vencimentos/:id", controller.getVencimento);

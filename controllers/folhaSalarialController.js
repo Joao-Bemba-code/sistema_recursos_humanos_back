@@ -130,12 +130,19 @@ var calcularTotais = function (dados) {
   return dados;
 };
 
+var formatarDataLocal = function (d) {
+  var ano = d.getFullYear();
+  var mes = String(d.getMonth() + 1).padStart(2, "0");
+  var dia = String(d.getDate()).padStart(2, "0");
+  return ano + "-" + mes + "-" + dia;
+};
+
 var calcularDescontoFaltas = async function (colaborador_id, mes, ano) {
   try {
     var dataInicio = new Date(ano, mes - 1, 1);
     var dataFim = new Date(ano, mes, 0);
-    var strInicio = dataInicio.toISOString().split("T")[0];
-    var strFim = dataFim.toISOString().split("T")[0];
+    var strInicio = formatarDataLocal(dataInicio);
+    var strFim = formatarDataLocal(dataFim);
 
     var faltas = await RegistoPresenca.findAll({
       where: {
@@ -433,6 +440,25 @@ var updatePagamento = async function (req, res) {
       }
     }
 
+    var toNum = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; };
+
+    var sb = toNum(dadosActualizar.salario_base !== undefined ? dadosActualizar.salario_base : pagamento.salario_base);
+    var sub = toNum(dadosActualizar.subsidios !== undefined ? dadosActualizar.subsidios : pagamento.subsidios);
+    var he = toNum(dadosActualizar.horas_extras !== undefined ? dadosActualizar.horas_extras : pagamento.horas_extras);
+    var desc = toNum(dadosActualizar.descontos !== undefined ? dadosActualizar.descontos : pagamento.descontos);
+
+    var obrigatorios = calcularDescontosObrigatorios(sb, sub, he);
+    dadosActualizar.seguranca_social = obrigatorios.seguranca_social;
+    dadosActualizar.irt = obrigatorios.irt;
+
+    var colId = pagamento.colaborador_id;
+    var mesAtual = dadosActualizar.mes !== undefined ? parseInt(dadosActualizar.mes) : pagamento.mes;
+    var anoAtual = dadosActualizar.ano !== undefined ? parseInt(dadosActualizar.ano) : pagamento.ano;
+    var descontoFaltas = await calcularDescontoFaltas(colId, mesAtual, anoAtual);
+    dadosActualizar.desconto_faltas = descontoFaltas;
+
+    dadosActualizar.total_liquido = Math.round((sb + sub + he - desc - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas) * 100) / 100;
+
     await pagamento.update(dadosActualizar);
 
     var actualizado = await Pagamento.findByPk(req.params.id, {
@@ -446,6 +472,7 @@ var updatePagamento = async function (req, res) {
       dados: actualizado,
     });
   } catch (e) {
+    console.log("Erro ao actualizar pagamento:", e.message);
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
 };
@@ -642,4 +669,18 @@ var listarPagamentosParaResumo = async function (mes, ano) {
   }
 };
 
-module.exports = { listVencimentos, getVencimento, createVencimento, updateVencimento, removeVencimentos, listPagamentos, createPagamento, updatePagamento, removePagamento, recalcularFaltas, gerarPagamentosAutomaticos, listarPagamentosParaResumo, getContratoActual };
+var previewDescontoFaltas = async function (req, res) {
+  try {
+    var { colaborador_id, mes, ano } = req.query;
+    if (!colaborador_id || !mes || !ano) {
+      return res.status(400).json({ error: "colaborador_id, mes e ano sao obrigatorios" });
+    }
+    var desconto = await calcularDescontoFaltas(colaborador_id, parseInt(mes), parseInt(ano));
+    return res.status(200).json({ dados: { desconto_faltas: desconto } });
+  } catch (e) {
+    console.log("Erro ao preview desconto faltas:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+module.exports = { listVencimentos, getVencimento, createVencimento, updateVencimento, removeVencimentos, listPagamentos, createPagamento, updatePagamento, removePagamento, recalcularFaltas, gerarPagamentosAutomaticos, listarPagamentosParaResumo, getContratoActual, previewDescontoFaltas };
