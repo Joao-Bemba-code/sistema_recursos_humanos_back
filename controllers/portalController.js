@@ -1,5 +1,27 @@
 var { Colaborador, Ferias, SolicitacaoFerias, AvaliacaoDesempenho, CicloAvaliacao, PedidoColaborador, RegistoPresenca, Contrato, Pagamento } = require("../models");
-var { Op } = require("sequelize");
+var { Op, Sequelize } = require("sequelize");
+
+var formatarDataLocal = function (d) {
+  var ano = d.getFullYear();
+  var mes = String(d.getMonth() + 1).padStart(2, "0");
+  var dia = String(d.getDate()).padStart(2, "0");
+  return ano + "-" + mes + "-" + dia;
+};
+
+var normalizarData = function (s) {
+  if (!s) return null;
+  var texto = String(s).trim();
+  var m = texto.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) {
+    return m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0");
+  }
+  var m2 = texto.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m2) {
+    return m2[3] + "-" + m2[2].padStart(2, "0") + "-" + m2[1].padStart(2, "0");
+  }
+  var d = new Date(texto + "T00:00:00");
+  return isNaN(d.getTime()) ? null : formatarDataLocal(d);
+};
 
 var calcularDescontoEstimado = async function (colaborador_id) {
   try {
@@ -223,4 +245,106 @@ var getPortalStats = async function (req, res) {
   }
 };
 
-module.exports = { getPortalStats };
+var getRegistosPresenca = async function (req, res) {
+  try {
+    var colaborador = await Colaborador.findOne({
+      where: { utilizador_id: req.utilizador.id, organizacao_id: req.utilizador.organizacao_id },
+    });
+
+    if (!colaborador) {
+      return res.status(200).json({ dados: [], paginacao: { total: 0, pagina: 1, limite: 30, total_paginas: 0 } });
+    }
+
+    var data = req.query.data ? String(req.query.data).trim() : "";
+    var mes = req.query.mes ? parseInt(req.query.mes, 10) : null;
+    var ano = req.query.ano ? parseInt(req.query.ano, 10) : null;
+    var dia = req.query.dia ? String(req.query.dia).padStart(2, "0") : "";
+    var tipo = req.query.tipo ? String(req.query.tipo).trim() : "";
+    var busca = req.query.busca ? String(req.query.busca).trim() : "";
+    var pagina = req.query.pagina ? parseInt(req.query.pagina, 10) : 1;
+    var limite = req.query.limite ? parseInt(req.query.limite, 10) : 30;
+    if (!pagina || pagina < 1) pagina = 1;
+    if (!limite || limite < 1 || limite > 200) limite = 30;
+
+    var conds = [{ colaborador_id: colaborador.id }];
+
+    if (data) {
+      var dataNorm = normalizarData(data);
+      if (dataNorm) conds.push({ data: dataNorm });
+    } else if (ano) {
+      if (mes) {
+        var ultimoDiaMes = new Date(ano, mes, 0).getDate();
+        conds.push({
+          data: {
+            [Op.between]: [
+              ano + "-" + String(mes).padStart(2, "0") + "-01",
+              ano + "-" + String(mes).padStart(2, "0") + "-" + String(ultimoDiaMes).padStart(2, "0"),
+            ],
+          },
+        });
+      } else {
+        conds.push({ data: { [Op.between]: [ano + "-01-01", ano + "-12-31"] } });
+      }
+    } else if (mes) {
+      var anoActual = new Date().getFullYear();
+      var ultimoDia = new Date(anoActual, mes, 0).getDate();
+      conds.push({
+        data: {
+          [Op.between]: [
+            anoActual + "-" + String(mes).padStart(2, "0") + "-01",
+            anoActual + "-" + String(mes).padStart(2, "0") + "-" + String(ultimoDia).padStart(2, "0"),
+          ],
+        },
+      });
+    }
+
+    if (dia) {
+      conds.push(Sequelize.where(Sequelize.fn("DATE_FORMAT", Sequelize.col("data"), "%d"), dia));
+    }
+
+    var estados = null;
+    if (tipo === "falta" || tipo === "faltas") estados = ["Ausente", "Atrasado"];
+    else if (tipo === "ausencia" || tipo === "ausente") estados = ["Ausente"];
+    else if (tipo === "atraso" || tipo === "atrasado") estados = ["Atrasado"];
+    else if (tipo === "presente") estados = ["Presente"];
+    else if (tipo === "licenca") estados = ["Licenca"];
+    else if (tipo === "ferias") estados = ["Ferias"];
+    else if (tipo === "fim_semana") estados = ["Fim_semana"];
+    if (estados) conds.push({ estado: { [Op.in]: estados } });
+
+    if (busca) {
+      conds.push({
+        [Op.or]: [
+          { data: { [Op.like]: "%" + busca + "%" } },
+          { estado: { [Op.like]: "%" + busca + "%" } },
+          { observacoes: { [Op.like]: "%" + busca + "%" } },
+        ],
+      });
+    }
+
+    var offset = (pagina - 1) * limite;
+
+    var resultado = await RegistoPresenca.findAndCountAll({
+      where: { [Op.and]: conds },
+      attributes: ["id", "data", "estado", "hora_entrada", "hora_saida", "horas_trabalhadas", "horas_extras", "metodo", "justificado", "observacoes"],
+      order: [["data", "DESC"], ["createdAt", "DESC"]],
+      limit: limite,
+      offset: offset,
+    });
+
+    return res.status(200).json({
+      dados: resultado.rows,
+      paginacao: {
+        total: resultado.count,
+        pagina: pagina,
+        limite: limite,
+        total_paginas: Math.ceil(resultado.count / limite),
+      },
+    });
+  } catch (e) {
+    console.log("Erro ao obter registos de presença:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+module.exports = { getPortalStats, getRegistosPresenca };
