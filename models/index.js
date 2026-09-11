@@ -312,6 +312,18 @@ var syncDatabase = async () => {
     } catch (alterErr10) {
       console.log(" Aviso: problema ao expandir enum tipo de pedidos_colaborador:", alterErr10.message);
     }
+
+    try {
+      var resultadoNotif = await sequelize.query("SHOW COLUMNS FROM `notificacoes`");
+      var colunasNotif = Array.isArray(resultadoNotif[0]) ? resultadoNotif[0] : resultadoNotif;
+      var nomesNotif = colunasNotif.map(function(c) { return c.Field; });
+      if (nomesNotif.indexOf("modulo") === -1) {
+        await sequelize.query("ALTER TABLE `notificacoes` ADD COLUMN `modulo` VARCHAR(50) NULL");
+        console.log(" Coluna 'modulo' adicionada a notificacoes!");
+      }
+    } catch (alterErrNotif) {
+      console.log(" Aviso: problema ao adicionar colunas de notificacoes:", alterErrNotif.message);
+    }
   } catch (e) {
     console.log(" Erro ao sincronizar BD:", e.message);
     throw e;
