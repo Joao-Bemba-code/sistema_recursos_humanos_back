@@ -43,10 +43,19 @@ function logoFilePath(url) {
   return clean;
 }
 
+function getLogoPath(org) {
+  var def = path.join(__dirname, "..", "uploads", "logos", "logo_default.jpg");
+  if (fs.existsSync(def)) return def;
+  if (org && org.logo_url) {
+    var p = logoFilePath(org.logo_url);
+    if (fs.existsSync(p)) return p;
+  }
+  return def;
+}
+
 function drawLogo(doc, org, x, y, maxW, maxH) {
-  if (!org || !org.logo_url) return false;
   try {
-    var logoPath = logoFilePath(org.logo_url);
+    var logoPath = getLogoPath(org);
     if (fs.existsSync(logoPath)) {
       doc.image(logoPath, x, y, { fit: [maxW, maxH] });
       return true;
@@ -218,15 +227,13 @@ exports.folhaSalarial = async function (req, res) {
     var rowH = 18;
     var y = 42;
 
-    if (org && org.logo_url) {
-      try {
-        var logoPath = logoFilePath(org.logo_url);
-        if (fs.existsSync(logoPath)) {
-          doc.image(logoPath, pw / 2 - 35, y, { fit: [70, 70] });
-          y += 78;
-        }
-      } catch (e) {}
-    }
+    try {
+      var logoPath = getLogoPath(org);
+      if (fs.existsSync(logoPath)) {
+        doc.image(logoPath, pw / 2 - 35, y, { fit: [70, 70] });
+        y += 78;
+      }
+    } catch (e) {}
 
     if (org && org.nome) {
       doc.font("Helvetica-Bold").fontSize(16).fillColor("#000000");
@@ -368,15 +375,13 @@ exports.contrato = async function (req, res) {
     var pw = doc.page.width;
     var logoHeight = 0;
 
-    if (org && org.logo_url) {
-      try {
-        var logoPath = logoFilePath(org.logo_url);
-        if (fs.existsSync(logoPath)) {
-          doc.image(logoPath, pw / 2 - 40, y, { fit: [80, 80] });
-          logoHeight = 90;
-        }
-      } catch (e) {}
-    }
+    try {
+      var logoPath = getLogoPath(org);
+      if (fs.existsSync(logoPath)) {
+        doc.image(logoPath, pw / 2 - 40, y, { fit: [80, 80] });
+        logoHeight = 90;
+      }
+    } catch (e) {}
 
     y += logoHeight;
 
@@ -655,6 +660,14 @@ function drawWarningHeader(doc, org, y) {
   var ml = 40;
   var w = doc.page.width - 80;
 
+  try {
+    var logoPath = getLogoPath(org);
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, doc.page.width / 2 - 40, y, { fit: [80, 80] });
+      y += 90;
+    }
+  } catch (e) {}
+
   // Nome da organização (falha para RHKAMATAMBU quando não houver dados)
   var nomeOrg = (org && org.nome) ? org.nome : "RHKAMATAMBU";
   doc.font("Helvetica-Bold").fontSize(15).fillColor("#1a1a1a");
@@ -841,15 +854,13 @@ exports.fichaColaborador = async function (req, res) {
     var y = 50;
     var logoHeight = 0;
 
-    if (org && org.logo_url) {
-      try {
-        var logoPath = logoFilePath(org.logo_url);
-        if (fs.existsSync(logoPath)) {
-          doc.image(logoPath, pw / 2 - 40, y, { fit: [80, 80] });
-          logoHeight = 90;
-        }
-      } catch (e) {}
-    }
+    try {
+      var logoPath = getLogoPath(org);
+      if (fs.existsSync(logoPath)) {
+        doc.image(logoPath, pw / 2 - 40, y, { fit: [80, 80] });
+        logoHeight = 90;
+      }
+    } catch (e) {}
 
     y += logoHeight;
 
@@ -1015,15 +1026,13 @@ exports.resumoPagamentos = async function (req, res) {
     var w = doc.page.width - 80;
     var y = 42;
 
-    if (org && org.logo_url) {
-      try {
-        var logoPath = logoFilePath(org.logo_url);
-        if (fs.existsSync(logoPath)) {
-          doc.image(logoPath, pw / 2 - 35, y, { fit: [70, 70] });
-          y += 78;
-        }
-      } catch (e) {}
-    }
+    try {
+      var logoPath = getLogoPath(org);
+      if (fs.existsSync(logoPath)) {
+        doc.image(logoPath, pw / 2 - 35, y, { fit: [70, 70] });
+        y += 78;
+      }
+    } catch (e) {}
 
     if (org && org.nome) {
       doc.font("Helvetica-Bold").fontSize(16).fillColor("#000000");
