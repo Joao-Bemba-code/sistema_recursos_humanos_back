@@ -29,9 +29,10 @@ async function getOrganizacao(colab) {
 
 function drawFooter(doc, org) {
   var orgNome = org ? org.nome : "SGHR";
-  var y = doc.page.height - 40;
-  doc.fontSize(8).fillColor("#999999")
-    .text(orgNome + " | Documento gerado pelo sistema SGHR", 40, y, { align: "center", width: doc.page.width - 80 });
+  var text = orgNome + " | Documento gerado pelo sistema SGHR";
+  var y = doc.page.height - 48;
+  doc.fontSize(8).fillColor("#999999");
+  doc.text(text, (doc.page.width - doc.widthOfString(text)) / 2, y, { lineBreak: false });
   doc.fillColor("#000000");
 }
 
@@ -230,8 +231,8 @@ exports.folhaSalarial = async function (req, res) {
     try {
       var logoPath = getLogoPath(org);
       if (fs.existsSync(logoPath)) {
-        doc.image(logoPath, pw / 2 - 35, y, { fit: [70, 70] });
-        y += 78;
+        doc.image(logoPath, pw / 2 - 22.5, y, { fit: [45, 45] });
+        y += 60;
       }
     } catch (e) {}
 
@@ -373,13 +374,13 @@ exports.contrato = async function (req, res) {
     var ml = 50;
     var w = doc.page.width - 100;
     var pw = doc.page.width;
-    var logoHeight = 0;
+var logoHeight = 0;
 
     try {
       var logoPath = getLogoPath(org);
       if (fs.existsSync(logoPath)) {
-        doc.image(logoPath, pw / 2 - 40, y, { fit: [80, 80] });
-        logoHeight = 90;
+        doc.image(logoPath, pw / 2 - 27.5, y, { fit: [55, 55] });
+        logoHeight = 76;
       }
     } catch (e) {}
 
@@ -663,8 +664,8 @@ function drawWarningHeader(doc, org, y) {
   try {
     var logoPath = getLogoPath(org);
     if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, doc.page.width / 2 - 40, y, { fit: [80, 80] });
-      y += 90;
+      doc.image(logoPath, doc.page.width / 2 - 27.5, y, { fit: [55, 55] });
+      y += 76;
     }
   } catch (e) {}
 
@@ -857,8 +858,8 @@ exports.fichaColaborador = async function (req, res) {
     try {
       var logoPath = getLogoPath(org);
       if (fs.existsSync(logoPath)) {
-        doc.image(logoPath, pw / 2 - 40, y, { fit: [80, 80] });
-        logoHeight = 90;
+        doc.image(logoPath, pw / 2 - 27.5, y, { fit: [55, 55] });
+        logoHeight = 76;
       }
     } catch (e) {}
 
@@ -1029,8 +1030,8 @@ exports.resumoPagamentos = async function (req, res) {
     try {
       var logoPath = getLogoPath(org);
       if (fs.existsSync(logoPath)) {
-        doc.image(logoPath, pw / 2 - 35, y, { fit: [70, 70] });
-        y += 78;
+        doc.image(logoPath, pw / 2 - 22.5, y, { fit: [45, 45] });
+        y += 60;
       }
     } catch (e) {}
 
