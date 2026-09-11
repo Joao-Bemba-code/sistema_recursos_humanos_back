@@ -82,7 +82,7 @@ app.use(sanitizeBody);
 app.use(morgan("dev"));
 
 // Uploads estaticos
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use("/uploads", express.static(path.join(__dirname, "uploads"), { setHeaders: function(res) { res.set("Cache-Control", "no-store, no-cache, must-revalidate"); res.set("Pragma", "no-cache"); } }));
 
 // LOG de rotas
 app.use(function (req, res, next) {

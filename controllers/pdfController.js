@@ -35,13 +35,18 @@ function drawFooter(doc, org) {
   doc.fillColor("#000000");
 }
 
+function logoFilePath(url) {
+  var clean = (url || "").split("?")[0];
+  if (clean.startsWith("/uploads/")) {
+    return path.join(__dirname, "..", clean);
+  }
+  return clean;
+}
+
 function drawLogo(doc, org, x, y, maxW, maxH) {
   if (!org || !org.logo_url) return false;
   try {
-    var logoPath = org.logo_url;
-    if (logoPath.startsWith("/uploads/")) {
-      logoPath = path.join(__dirname, "..", logoPath);
-    }
+    var logoPath = logoFilePath(org.logo_url);
     if (fs.existsSync(logoPath)) {
       doc.image(logoPath, x, y, { fit: [maxW, maxH] });
       return true;
@@ -215,8 +220,7 @@ exports.folhaSalarial = async function (req, res) {
 
     if (org && org.logo_url) {
       try {
-        var logoPath = org.logo_url;
-        if (logoPath.startsWith("/uploads/")) { logoPath = path.join(__dirname, "..", logoPath); }
+        var logoPath = logoFilePath(org.logo_url);
         if (fs.existsSync(logoPath)) {
           doc.image(logoPath, pw / 2 - 35, y, { fit: [70, 70] });
           y += 78;
@@ -366,10 +370,7 @@ exports.contrato = async function (req, res) {
 
     if (org && org.logo_url) {
       try {
-        var logoPath = org.logo_url;
-        if (logoPath.startsWith("/uploads/")) {
-          logoPath = path.join(__dirname, "..", logoPath);
-        }
+        var logoPath = logoFilePath(org.logo_url);
         if (fs.existsSync(logoPath)) {
           doc.image(logoPath, pw / 2 - 40, y, { fit: [80, 80] });
           logoHeight = 90;
@@ -842,8 +843,7 @@ exports.fichaColaborador = async function (req, res) {
 
     if (org && org.logo_url) {
       try {
-        var logoPath = org.logo_url;
-        if (logoPath.startsWith("/uploads/")) { logoPath = path.join(__dirname, "..", logoPath); }
+        var logoPath = logoFilePath(org.logo_url);
         if (fs.existsSync(logoPath)) {
           doc.image(logoPath, pw / 2 - 40, y, { fit: [80, 80] });
           logoHeight = 90;
@@ -1011,8 +1011,7 @@ exports.resumoPagamentos = async function (req, res) {
 
     if (org && org.logo_url) {
       try {
-        var logoPath = org.logo_url;
-        if (logoPath.startsWith("/uploads/")) { logoPath = path.join(__dirname, "..", logoPath); }
+        var logoPath = logoFilePath(org.logo_url);
         if (fs.existsSync(logoPath)) {
           doc.image(logoPath, pw / 2 - 35, y, { fit: [70, 70] });
           y += 78;

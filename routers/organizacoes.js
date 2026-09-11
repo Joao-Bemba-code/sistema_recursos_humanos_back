@@ -33,7 +33,7 @@ router.post("/:id/logo", requireRole("Administrador Geral", "Director Geral"), a
     var filepath = path.join(uploadDir, filename);
     await logo.mv(filepath);
 
-    var logoUrl = "/uploads/logos/" + filename;
+    var logoUrl = "/uploads/logos/" + filename + "?v=" + Date.now();
     await org.update({ logo_url: logoUrl });
 
     return res.status(200).json({ mensagem: "Logo atualizado com sucesso", dados: { logo_url: logoUrl } });
