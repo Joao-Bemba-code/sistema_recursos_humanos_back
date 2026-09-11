@@ -654,7 +654,7 @@ var gerarPagamentosAutomaticos = async function (req, res) {
 var listarPagamentosParaResumo = async function (mes, ano) {
   var where = { mes: mes, ano: ano };
   var include = [
-    { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
+    { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "organizacao_id"] },
   ];
   try {
     var pagamentos = await Pagamento.findAll({

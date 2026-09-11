@@ -995,8 +995,14 @@ exports.resumoPagamentos = async function (req, res) {
       return res.status(404).json({ error: "Nenhum pagamento encontrado para o periodo indicado" });
     }
 
-    // Determinar organizacao a partir do primeiro colaborador
-    var primeiroColab = pagamentos[0] && pagamentos[0].colaborador ? pagamentos[0].colaborador : null;
+    // Determinar organizacao a partir do primeiro colaborador que tenha organizacao
+    var primeiroColab = null;
+    for (var i = 0; i < pagamentos.length; i++) {
+      if (pagamentos[i] && pagamentos[i].colaborador && pagamentos[i].colaborador.organizacao_id) {
+        primeiroColab = pagamentos[i].colaborador;
+        break;
+      }
+    }
     var org = await getOrganizacao(primeiroColab);
 
     var doc = new PDFDocument({ size: "A4", margin: 40 });
