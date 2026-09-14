@@ -1,6 +1,6 @@
 var { Op } = require("sequelize");
 var { OcorrenciaDisciplinar, Colaborador, Utilizador } = require("../models");
-var { requireRole } = require("../protect/rbac");
+var { requireModulo } = require("../protect/rbac");
 var notificacaoController = require("../controllers/notificacaoController");
 
 var router = require("express").Router();
@@ -11,7 +11,7 @@ var generateNumero = async function () {
   return "OD-" + year + "-" + String(count + 1).padStart(4, "0");
 };
 
-router.get("/", requireRole("Administrador Geral", "Director Geral", "Director de Recursos Humanos", "Técnico de RH"), async function (req, res) {
+router.get("/", requireModulo("advertencias", "read", "Administrador Geral", "Director Geral", "Director de Recursos Humanos", "Técnico de RH"), async function (req, res) {
   try {
     var page = parseInt(req.query.page) || 1;
     var limit = parseInt(req.query.limit) || 15;
@@ -61,7 +61,7 @@ router.get("/", requireRole("Administrador Geral", "Director Geral", "Director d
   }
 });
 
-router.get("/:id", requireRole("Administrador Geral", "Director Geral", "Director de Recursos Humanos", "Técnico de RH"), async function (req, res) {
+router.get("/:id", requireModulo("advertencias", "read", "Administrador Geral", "Director Geral", "Director de Recursos Humanos", "Técnico de RH"), async function (req, res) {
   try {
     var ocorrencia = await OcorrenciaDisciplinar.findByPk(req.params.id, {
       include: [
@@ -83,7 +83,7 @@ router.get("/:id", requireRole("Administrador Geral", "Director Geral", "Directo
   }
 });
 
-router.post("/", requireRole("Administrador Geral", "Director Geral", "Director de Recursos Humanos"), async function (req, res) {
+router.post("/", requireModulo("advertencias", "create", "Administrador Geral", "Director Geral", "Director de Recursos Humanos"), async function (req, res) {
   try {
     var {
       colaborador_id, tipo, data_ocorrencia, descricao,
@@ -149,7 +149,7 @@ router.post("/", requireRole("Administrador Geral", "Director Geral", "Director 
   }
 });
 
-router.put("/:id", requireRole("Administrador Geral", "Director Geral", "Director de Recursos Humanos"), async function (req, res) {
+router.put("/:id", requireModulo("advertencias", "update", "Administrador Geral", "Director Geral", "Director de Recursos Humanos"), async function (req, res) {
   try {
     var ocorrencia = await OcorrenciaDisciplinar.findByPk(req.params.id);
     if (!ocorrencia) {
@@ -186,7 +186,7 @@ router.put("/:id", requireRole("Administrador Geral", "Director Geral", "Directo
   }
 });
 
-router.delete("/:id", requireRole("Administrador Geral", "Director Geral"), async function (req, res) {
+router.delete("/:id", requireModulo("advertencias", "delete", "Administrador Geral", "Director Geral"), async function (req, res) {
   try {
     var ocorrencia = await OcorrenciaDisciplinar.findByPk(req.params.id);
     if (!ocorrencia) {

@@ -1,12 +1,12 @@
 ﻿var express = require("express");
 var router = express.Router();
 var controller = require("../controllers/assiduidadeController");
-var { requireRole } = require("../protect/rbac");
+var { requireModulo } = require("../protect/rbac");
 
-router.get("/", controller.list);
-router.get("/:id", controller.getById);
-router.post("/", requireRole("Administrador Geral", "Director Geral", "Director de Recursos Humanos"), controller.create);
-router.put("/:id", requireRole("Administrador Geral", "Director Geral", "Director de Recursos Humanos"), controller.update);
-router.delete("/:id", requireRole("Administrador Geral"), controller.remove);
+router.get("/", requireModulo("assiduidade", "read", "Administrador Geral", "Director Geral", "Director de Recursos Humanos"), controller.list);
+router.get("/:id", requireModulo("assiduidade", "read", "Administrador Geral", "Director Geral", "Director de Recursos Humanos"), controller.getById);
+router.post("/", requireModulo("assiduidade", "create", "Administrador Geral", "Director Geral", "Director de Recursos Humanos"), controller.create);
+router.put("/:id", requireModulo("assiduidade", "update", "Administrador Geral", "Director Geral", "Director de Recursos Humanos"), controller.update);
+router.delete("/:id", requireModulo("assiduidade", "delete", "Administrador Geral"), controller.remove);
 
 module.exports = router;

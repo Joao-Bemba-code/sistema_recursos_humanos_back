@@ -134,4 +134,41 @@ var requirePermission = function (modulo, operacao) {
   };
 };
 
-module.exports = { requireRole, requireLevel, requirePermission, normalizarPermissoes, perfisUtilizador, fundirPermissoes, prepararUtilizador };
+// Acesso baseado em módulo: passa se o utilizador tiver a permissão explícita
+// no módulo/operação, se for administrador (nível 4) ou se tiver um dos perfis
+// de reforço indicados (para compatibilidade com perfis sem permissoes definidas).
+var requireModulo = function (modulo, operacao) {
+  var roles = Array.prototype.slice.call(arguments, 2);
+  return function (req, res, next) {
+    if (!req.utilizador) {
+      return res.status(403).json({ error: "Perfil não encontrado" });
+    }
+
+    var perfis = perfisUtilizador(req.utilizador);
+    var fundido = fundirPermissoes(perfis);
+
+    if (fundido.nivel >= 4) {
+      return next();
+    }
+
+    if (fundido.permissoes[modulo] && fundido.permissoes[modulo].indexOf(operacao) !== -1) {
+      return next();
+    }
+
+    var rolesLower = roles.map(function (r) { return r.toLowerCase(); });
+    var temPerfil = perfis.some(function (p) {
+      return p && rolesLower.indexOf(String(p.nome).toLowerCase()) !== -1;
+    });
+    if (temPerfil) {
+      return next();
+    }
+
+    return res.status(403).json({
+      error: "Sem permissão para esta operação",
+      modulo: modulo,
+      operacao: operacao,
+    });
+  };
+};
+
+module.exports = { requireRole, requireLevel, requirePermission, requireModulo, normalizarPermissoes, perfisUtilizador, fundirPermissoes, prepararUtilizador };
