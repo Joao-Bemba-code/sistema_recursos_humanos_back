@@ -1,5 +1,6 @@
 var { Op } = require("sequelize");
-var { CicloAvaliacao, AvaliacaoDesempenho, Colaborador, Utilizador, Notificacao } = require("../models");
+var { CicloAvaliacao, AvaliacaoDesempenho, Colaborador, Utilizador } = require("../models");
+var notificacaoController = require("./notificacaoController");
 
 // ==================== CICLOS ====================
 
@@ -211,7 +212,7 @@ var createAvaliacao = async function (req, res) {
       var colab = await Colaborador.findByPk(dados.colaborador_id, { attributes: ["id", "nome_completo", "utilizador_id"] });
       if (colab && colab.utilizador_id) {
         var ciclo = await CicloAvaliacao.findByPk(dados.ciclo_id, { attributes: ["nome"] });
-        await Notificacao.create({
+        await notificacaoController.create({
           organizacao_id: req.utilizador.organizacao_id,
           utilizador_id: colab.utilizador_id,
           titulo: "Nova Avaliacao",
@@ -270,7 +271,7 @@ var updateAvaliacao = async function (req, res) {
         var novoEstado = dadosActualizar.estado || avaliacao.estado;
         var msgNotif = "A sua avaliacao no ciclo '" + (cicloUpdate ? cicloUpdate.nome : "—") + "' foi actualizada.";
         if (novoEstado === "Validada") msgNotif = "A sua avaliacao no ciclo '" + (cicloUpdate ? cicloUpdate.nome : "—") + "' foi validada. Nota final: " + (dadosActualizar.nota_final || avaliacao.nota_final || "—");
-        await Notificacao.create({
+        await notificacaoController.create({
           organizacao_id: req.utilizador.organizacao_id,
           utilizador_id: colabUpdate.utilizador_id,
           titulo: "Avaliacao Actualizada",

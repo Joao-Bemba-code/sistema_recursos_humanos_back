@@ -1,5 +1,19 @@
 var { Op } = require("sequelize");
-var { Notificacao, Utilizador } = require("../models");
+var { sequelize } = require("../config");
+var { Notificacao } = require("../models");
+
+var temColunaModulo = null;
+var verificarColunaModulo = async function () {
+  if (temColunaModulo !== null) return temColunaModulo;
+  try {
+    var res = await sequelize.query("SHOW COLUMNS FROM `notificacoes` LIKE 'modulo'");
+    var linhas = Array.isArray(res[0]) ? res[0] : res;
+    temColunaModulo = linhas.length > 0;
+  } catch (e) {
+    temColunaModulo = false;
+  }
+  return temColunaModulo;
+};
 
 var list = async function (req, res) {
   try {
@@ -17,12 +31,17 @@ var list = async function (req, res) {
       where.lida = lida === "true" || lida === "1";
     }
 
-    var { count, rows } = await Notificacao.findAndCountAll({
+    var opcoes = {
       where: where,
       order: [["createdAt", "DESC"]],
       limit: limit,
       offset: offset,
-    });
+    };
+    if (!(await verificarColunaModulo())) {
+      opcoes.attributes = { exclude: ["modulo"] };
+    }
+
+    var { count, rows } = await Notificacao.findAndCountAll(opcoes);
 
     var naoLidas = await Notificacao.count({
       where: {
@@ -50,13 +69,18 @@ var list = async function (req, res) {
 
 var markRead = async function (req, res) {
   try {
-    var notificacao = await Notificacao.findOne({
+    var opcoes = {
       where: {
         id: req.params.id,
         organizacao_id: req.utilizador.organizacao_id,
         utilizador_id: req.utilizador.id,
       },
-    });
+    };
+    if (!(await verificarColunaModulo())) {
+      opcoes.attributes = { exclude: ["modulo"] };
+    }
+
+    var notificacao = await Notificacao.findOne(opcoes);
 
     if (!notificacao) {
       return res.status(404).json({ error: "Notificacao nao encontrada" });
@@ -99,7 +123,7 @@ var markAllRead = async function (req, res) {
 
 var create = async function (data) {
   try {
-    var notificacao = await Notificacao.create({
+    var dados = {
       organizacao_id: data.organizacao_id,
       utilizador_id: data.utilizador_id,
       titulo: data.titulo,
@@ -107,8 +131,12 @@ var create = async function (data) {
       tipo: data.tipo || "info",
       lida: false,
       link: data.link || null,
-      modulo: data.modulo || null,
-    });
+    };
+    if (await verificarColunaModulo()) {
+      dados.modulo = data.modulo || null;
+    }
+
+    var notificacao = await Notificacao.create(dados);
 
     return notificacao;
   } catch (e) {
