@@ -134,11 +134,9 @@ var requirePermission = function (modulo, operacao) {
   };
 };
 
-// Acesso baseado em módulo: passa se o utilizador tiver a permissão explícita
-// no módulo/operação, se for administrador (nível 4) ou se tiver um dos perfis
-// de reforço indicados (para compatibilidade com perfis sem permissoes definidas).
+// Acesso baseado em módulo: passa apenas com permissão explícita no
+// módulo/operação ou se o utilizador for administrador (nível 4).
 var requireModulo = function (modulo, operacao) {
-  var roles = Array.prototype.slice.call(arguments, 2);
   return function (req, res, next) {
     if (!req.utilizador) {
       return res.status(403).json({ error: "Perfil não encontrado" });
@@ -152,14 +150,6 @@ var requireModulo = function (modulo, operacao) {
     }
 
     if (fundido.permissoes[modulo] && fundido.permissoes[modulo].indexOf(operacao) !== -1) {
-      return next();
-    }
-
-    var rolesLower = roles.map(function (r) { return r.toLowerCase(); });
-    var temPerfil = perfis.some(function (p) {
-      return p && rolesLower.indexOf(String(p.nome).toLowerCase()) !== -1;
-    });
-    if (temPerfil) {
       return next();
     }
 

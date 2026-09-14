@@ -22,6 +22,17 @@ var MODULOS_SISTEMA = [
   { chave: "portal", nome: "Portal" },
 ];
 
+var filtrarPermissoes = function (perm) {
+  var p = normalizarPermissoes(perm);
+  var chaves = {};
+  MODULOS_SISTEMA.forEach(function (m) { chaves[m.chave] = true; });
+  var out = {};
+  Object.keys(p).forEach(function (k) {
+    if (chaves[k]) out[k] = p[k];
+  });
+  return out;
+};
+
 router.get("/", requireRole("Administrador Geral", "Director Geral", "Director de Recursos Humanos"), async function (req, res) {
   try {
     var perfis = await Perfil.findAll({
@@ -109,7 +120,7 @@ router.put("/:id", requireRole("Administrador Geral"), async function (req, res)
     if (req.body.nome !== undefined) dadosActualizar.nome = req.body.nome;
     if (req.body.descricao !== undefined) dadosActualizar.descricao = req.body.descricao;
     if (req.body.nivel !== undefined) dadosActualizar.nivel = req.body.nivel;
-    if (req.body.permissoes !== undefined) dadosActualizar.permissoes = normalizarPermissoes(req.body.permissoes);
+    if (req.body.permissoes !== undefined) dadosActualizar.permissoes = filtrarPermissoes(req.body.permissoes);
     if (req.body.activo !== undefined) dadosActualizar.activo = req.body.activo;
 
     await perfil.update(dadosActualizar);
@@ -148,7 +159,7 @@ router.post("/", requireRole("Administrador Geral"), async function (req, res) {
       nome: nome,
       descricao: descricao || "",
       nivel: nivel || 0,
-      permissoes: normalizarPermissoes(permissoes || {}),
+      permissoes: filtrarPermissoes(permissoes || {}),
     });
 
     return res.status(201).json({
