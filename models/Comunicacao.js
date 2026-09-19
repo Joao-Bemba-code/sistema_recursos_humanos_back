@@ -7,6 +7,10 @@ var Aviso = sequelize.define("Aviso", {
     defaultValue: DataTypes.UUIDV4,
     primaryKey: true,
   },
+  organizacao_id: {
+    type: DataTypes.UUID,
+    allowNull: false,
+  },
   titulo: {
     type: DataTypes.STRING(200),
     allowNull: false,
@@ -38,6 +42,10 @@ var Aviso = sequelize.define("Aviso", {
   publicado: {
     type: DataTypes.BOOLEAN,
     defaultValue: true,
+  },
+  criado_por: {
+    type: DataTypes.UUID,
+    allowNull: true,
   },
 }, {
   tableName: "avisos",

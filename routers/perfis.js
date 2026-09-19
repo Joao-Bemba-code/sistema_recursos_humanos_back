@@ -20,6 +20,7 @@ var MODULOS_SISTEMA = [
   { chave: "relatorios", nome: "Relatórios" },
   { chave: "configuracoes", nome: "Configurações" },
   { chave: "portal", nome: "Portal" },
+  { chave: "comunicados", nome: "Comunicados" },
 ];
 
 var filtrarPermissoes = function (perm) {

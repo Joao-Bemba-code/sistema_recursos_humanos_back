@@ -150,6 +150,18 @@ PedidoColaborador.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "co
 Organizacao.hasMany(PedidoColaborador, { foreignKey: "organizacao_id", as: "pedidos_colaborador" });
 PedidoColaborador.belongsTo(Organizacao, { foreignKey: "organizacao_id", as: "organizacao" });
 
+// Aviso -> Organizacao
+Organizacao.hasMany(Aviso, { foreignKey: "organizacao_id", as: "avisos" });
+Aviso.belongsTo(Organizacao, { foreignKey: "organizacao_id", as: "organizacao" });
+
+// Aviso -> Utilizador (criado_por)
+Utilizador.hasMany(Aviso, { foreignKey: "criado_por", as: "avisos_criados" });
+Aviso.belongsTo(Utilizador, { foreignKey: "criado_por", as: "criador" });
+
+// Aviso -> Departamento
+Departamento.hasMany(Aviso, { foreignKey: "departamento_id", as: "avisos" });
+Aviso.belongsTo(Departamento, { foreignKey: "departamento_id", as: "departamento" });
+
 // LogAuditoria -> Utilizador
 Utilizador.hasMany(LogAuditoria, { foreignKey: "utilizador_id", as: "logs" });
 LogAuditoria.belongsTo(Utilizador, { foreignKey: "utilizador_id", as: "utilizador" });
@@ -323,6 +335,22 @@ var syncDatabase = async () => {
       }
     } catch (alterErrNotif) {
       console.log(" Aviso: problema ao adicionar colunas de notificacoes:", alterErrNotif.message);
+    }
+
+    try {
+      var resultadoAvisos = await sequelize.query("SHOW COLUMNS FROM `avisos`");
+      var colunasAvisos = Array.isArray(resultadoAvisos[0]) ? resultadoAvisos[0] : resultadoAvisos;
+      var nomesAvisos = colunasAvisos.map(function(c) { return c.Field; });
+      if (nomesAvisos.indexOf("organizacao_id") === -1) {
+        await sequelize.query("ALTER TABLE `avisos` ADD COLUMN `organizacao_id` VARCHAR(36) NULL");
+        console.log(" Coluna 'organizacao_id' adicionada a avisos!");
+      }
+      if (nomesAvisos.indexOf("criado_por") === -1) {
+        await sequelize.query("ALTER TABLE `avisos` ADD COLUMN `criado_por` VARCHAR(36) NULL");
+        console.log(" Coluna 'criado_por' adicionada a avisos!");
+      }
+    } catch (alterErrAvisos) {
+      console.log(" Aviso: problema ao adicionar colunas de avisos:", alterErrAvisos.message);
     }
   } catch (e) {
     console.log(" Erro ao sincronizar BD:", e.message);

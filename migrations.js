@@ -116,6 +116,10 @@ var migrations = async function () {
     // ==================== NOTIFICACOES: separacao por modulo ====================
     await adicionarColuna("notificacoes", "modulo", "VARCHAR(50) NULL");
 
+    // ==================== AVISOS / COMUNICADOS ====================
+    await adicionarColuna("avisos", "organizacao_id", "VARCHAR(36) NULL");
+    await adicionarColuna("avisos", "criado_por", "VARCHAR(36) NULL");
+
     // ==================== COLABORADORES ====================
     await alterarColuna("colaboradores", "nome_completo", "VARCHAR(200) NULL");
 

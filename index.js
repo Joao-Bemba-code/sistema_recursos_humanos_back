@@ -31,6 +31,7 @@ var portalRoutes = require("./routers/portal");
 var faltasRoutes = require("./routers/faltas");
 var pdfRoutes = require("./routers/pdf");
 var ocorrenciaRoutes = require("./routers/ocorrencias");
+var comunicacaoRoutes = require("./routers/comunicacoes");
 
 // CORREÇÃO: Importação protegida do módulo seed para evitar o crash MODULE_NOT_FOUND
 var seed = null;
@@ -59,9 +60,16 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || "*",
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  origin: function (origin, callback) {
+    // Refletir sempre a origem do pedido. A autenticacao usa tokens (Authorization),
+    // nao cookies, pelo que nao ha risco de CSRF associado a CORS.
+    callback(null, true);
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  exposedHeaders: ["Content-Disposition"],
+  maxAge: 86400,
 }));
 
 // File upload
@@ -113,6 +121,7 @@ app.use("/api/portal", authenticate, portalRoutes);
 app.use("/api/faltas", authenticate, faltasRoutes);
 app.use("/api/pdf", authenticate, pdfRoutes);
 app.use("/api/ocorrencias", authenticate, ocorrenciaRoutes);
+app.use("/api/comunicados", authenticate, comunicacaoRoutes);
 
 // Health check
 app.get("/health", function (req, res) {
