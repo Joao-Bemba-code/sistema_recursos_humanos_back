@@ -194,6 +194,36 @@ var calcularDescontoFaltas = async function (colaborador_id, mes, ano) {
   }
 };
 
+var PERCENTUAL_HORA_EXTRA = 1.5;
+
+var calcularValorHorasExtras = async function (colaborador_id, mes, ano, salarioBase) {
+  try {
+    var dataInicio = new Date(ano, mes - 1, 1);
+    var dataFim = new Date(ano, mes, 0);
+    var strInicio = formatarDataLocal(dataInicio);
+    var strFim = formatarDataLocal(dataFim);
+
+    var resultado = await RegistoPresenca.findOne({
+      where: {
+        colaborador_id: colaborador_id,
+        data: { [Op.between]: [strInicio, strFim] },
+      },
+      attributes: [[sequelize.fn("SUM", sequelize.col("horas_extras")), "total_horas_extras"]],
+      raw: true,
+    });
+
+    var totalHoras = parseFloat(resultado && resultado.total_horas_extras) || 0;
+    if (totalHoras <= 0) return 0;
+
+    var salarioDiario = (parseFloat(salarioBase) || 0) / 30;
+    var salarioHora = salarioDiario / 8;
+    return arredondar(totalHoras * salarioHora * PERCENTUAL_HORA_EXTRA);
+  } catch (e) {
+    console.log("Erro ao calcular horas extras:", e.message);
+    return 0;
+  }
+};
+
 var getContratoActual = async function (req, res) {
   try {
     var { colaborador_id } = req.params;
@@ -396,7 +426,11 @@ var createPagamento = async function (req, res) {
     var toNum = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; };
     dados.salario_base = toNum(dados.salario_base);
     dados.subsidios = toNum(dados.subsidios);
-    dados.horas_extras = toNum(dados.horas_extras);
+    if (dados.horas_extras === undefined || dados.horas_extras === null || dados.horas_extras === "") {
+      dados.horas_extras = await calcularValorHorasExtras(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano), dados.salario_base);
+    } else {
+      dados.horas_extras = toNum(dados.horas_extras);
+    }
     dados.descontos = toNum(dados.descontos);
 
     var obrigatorios = calcularDescontosObrigatorios(dados.salario_base, dados.subsidios, dados.horas_extras);
@@ -596,10 +630,11 @@ var gerarPagamentosAutomaticos = async function (req, res) {
 
       var salarioBase = toNum(contrato.salario_base);
       var subsidios = toNum(contrato.subsidio_alimentacao);
+      var horasExtras = await calcularValorHorasExtras(colab.id, parseInt(mes), parseInt(ano), salarioBase);
 
-      var obrigatorios = calcularDescontosObrigatorios(salarioBase, subsidios, 0);
+      var obrigatorios = calcularDescontosObrigatorios(salarioBase, subsidios, horasExtras);
       var descontoFaltas = await calcularDescontoFaltas(colab.id, parseInt(mes), parseInt(ano));
-      var totalLiquido = Math.round((salarioBase + subsidios - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas) * 100) / 100;
+      var totalLiquido = Math.round((salarioBase + subsidios + horasExtras - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas) * 100) / 100;
 
       var pagamentoDados = {
         colaborador_id: colab.id,
@@ -607,7 +642,7 @@ var gerarPagamentosAutomaticos = async function (req, res) {
         ano: parseInt(ano),
         salario_base: salarioBase,
         subsidios: subsidios,
-        horas_extras: 0,
+        horas_extras: horasExtras,
         descontos: 0,
         irt: obrigatorios.irt,
         seguranca_social: obrigatorios.seguranca_social,
@@ -683,4 +718,20 @@ var previewDescontoFaltas = async function (req, res) {
   }
 };
 
-module.exports = { listVencimentos, getVencimento, createVencimento, updateVencimento, removeVencimentos, listPagamentos, createPagamento, updatePagamento, removePagamento, recalcularFaltas, gerarPagamentosAutomaticos, listarPagamentosParaResumo, getContratoActual, previewDescontoFaltas };
+var previewHorasExtras = async function (req, res) {
+  try {
+    var { colaborador_id, mes, ano } = req.query;
+    if (!colaborador_id || !mes || !ano) {
+      return res.status(400).json({ error: "colaborador_id, mes e ano sao obrigatorios" });
+    }
+    var contrato = await getSalarioContrato(colaborador_id);
+    var salarioBase = contrato && contrato.salario_base ? parseFloat(contrato.salario_base) : 0;
+    var valor = await calcularValorHorasExtras(colaborador_id, parseInt(mes), parseInt(ano), salarioBase);
+    return res.status(200).json({ dados: { horas_extras: valor } });
+  } catch (e) {
+    console.log("Erro ao preview horas extras:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+module.exports = { listVencimentos, getVencimento, createVencimento, updateVencimento, removeVencimentos, listPagamentos, createPagamento, updatePagamento, removePagamento, recalcularFaltas, gerarPagamentosAutomaticos, listarPagamentosParaResumo, getContratoActual, previewDescontoFaltas, previewHorasExtras };

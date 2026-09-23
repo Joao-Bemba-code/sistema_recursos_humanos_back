@@ -5,6 +5,7 @@ var { requireModulo } = require("../protect/rbac");
 
 router.get("/contrato-actual/:colaborador_id", requireModulo("folha_salarial", "read", "Administrador Geral", "Director Geral", "Director de Recursos Humanos", "Financeiro"), controller.getContratoActual);
 router.get("/preview-desconto-faltas", requireModulo("folha_salarial", "read", "Administrador Geral", "Director Geral", "Director de Recursos Humanos", "Financeiro"), controller.previewDescontoFaltas);
+router.get("/preview-horas-extras", requireModulo("folha_salarial", "read", "Administrador Geral", "Director Geral", "Director de Recursos Humanos", "Financeiro"), controller.previewHorasExtras);
 
 router.get("/vencimentos", requireModulo("folha_salarial", "read", "Administrador Geral", "Director Geral", "Director de Recursos Humanos", "Financeiro"), controller.listVencimentos);
 router.get("/vencimentos/:id", requireModulo("folha_salarial", "read", "Administrador Geral", "Director Geral", "Director de Recursos Humanos", "Financeiro"), controller.getVencimento);

@@ -85,9 +85,12 @@ var create = async function (req, res) {
       var entrada = new Date("1970-01-01T" + dados.hora_entrada);
       var saida = new Date("1970-01-01T" + dados.hora_saida);
       var diff = (saida - entrada) / (1000 * 60 * 60);
+      if (diff < 0) diff += 24;
       dados.horas_trabalhadas = Math.round(diff * 100) / 100;
       if (diff > 8) {
         dados.horas_extras = Math.round((diff - 8) * 100) / 100;
+      } else {
+        dados.horas_extras = 0;
       }
     }
 
@@ -129,6 +132,7 @@ var update = async function (req, res) {
       var entrada = new Date("1970-01-01T" + horaEntrada);
       var saida = new Date("1970-01-01T" + horaSaida);
       var diff = (saida - entrada) / (1000 * 60 * 60);
+      if (diff < 0) diff += 24;
       dadosActualizar.horas_trabalhadas = Math.round(diff * 100) / 100;
       dadosActualizar.horas_extras = diff > 8 ? Math.round((diff - 8) * 100) / 100 : 0;
     }
