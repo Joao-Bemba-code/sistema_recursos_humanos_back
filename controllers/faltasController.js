@@ -152,7 +152,6 @@ var resumo = async function (req, res) {
         }
       }
       resumoColab[cid].minutos_atraso_total += mins;
-      var horasAtraso = Math.round((mins / 60) * 100) / 100;
       var justificado = a.justificado || false;
       if (justificado) {
         resumoColab[cid].total_atrasos_justificados++;
@@ -160,8 +159,6 @@ var resumo = async function (req, res) {
         resumoColab[cid].total_atrasos_processados++;
       } else {
         resumoColab[cid].total_atrasos_pendentes++;
-        resumoColab[cid].horas_descontar += horasAtraso;
-        resumoColab[cid].horas_descontar_efectivo += horasAtraso;
       }
       resumoColab[cid].atrasos_detalhe.push({
         id: a.id,

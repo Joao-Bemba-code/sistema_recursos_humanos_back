@@ -87,14 +87,6 @@ var calcularDescontoEstimado = async function (colaborador_id) {
         nFaltas++;
       } else if (f.estado === "Atrasado") {
         nAtrasos++;
-        if (f.hora_entrada) {
-          var partes = f.hora_entrada.split(":");
-          var minsEntrada = parseInt(partes[0]) * 60 + parseInt(partes[1]);
-          var minsNormais = 8 * 60;
-          if (minsEntrada > minsNormais) {
-            horasDescontar += Math.round(((minsEntrada - minsNormais) / 60) * 100) / 100;
-          }
-        }
       }
     });
 
