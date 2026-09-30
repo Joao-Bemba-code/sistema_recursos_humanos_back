@@ -1017,7 +1017,7 @@ exports.resumoPagamentos = async function (req, res) {
     }
     var org = await getOrganizacao(primeiroColab);
 
-    var doc = new PDFDocument({ size: "A4", margin: 40 });
+    var doc = new PDFDocument({ size: "A4", margin: 40, layout: "landscape" });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", "attachment; filename=resumo_pagamentos_" + mes + "_" + ano + ".pdf");
     doc.pipe(res);
@@ -1051,7 +1051,7 @@ exports.resumoPagamentos = async function (req, res) {
 
     // Agregacao
     var totalColab = pagamentos.length;
-    var totalBruto = 0, totalSubsidios = 0, totalExtras = 0, totalIRT = 0, totalSS = 0, totalFaltas = 0, totalLiquido = 0;
+    var totalBruto = 0, totalSubsidios = 0, totalExtras = 0, totalIRT = 0, totalSS = 0, totalFaltas = 0, totalDescontos = 0, totalLiquido = 0;
     var porEstado = { Pendente: 0, Pago: 0, Cancelado: 0 };
 
     pagamentos.forEach(function (p) {
@@ -1061,6 +1061,7 @@ exports.resumoPagamentos = async function (req, res) {
       totalIRT += parseFloat(p.irt) || 0;
       totalSS += parseFloat(p.seguranca_social) || 0;
       totalFaltas += parseFloat(p.desconto_faltas) || 0;
+      totalDescontos += parseFloat(p.descontos) || 0;
       totalLiquido += parseFloat(p.total_liquido) || 0;
       if (porEstado[p.estado] !== undefined) porEstado[p.estado]++;
     });
@@ -1073,7 +1074,7 @@ exports.resumoPagamentos = async function (req, res) {
     function resumoRow(label, value) {
       doc.font("Helvetica").fontSize(10).fillColor("#000000");
       doc.text(label, ml + 8, y);
-      doc.text(value, pw - 60 - 180, y, { align: "right", width: 180 });
+      doc.text(value, ml + 300, y, { align: "right", width: 180 });
       y += 18;
     }
 
@@ -1084,12 +1085,13 @@ exports.resumoPagamentos = async function (req, res) {
     resumoRow("Total IRT", "- " + fmt(totalIRT) + " Kz");
     resumoRow("Total Seguranca Social", "- " + fmt(totalSS) + " Kz");
     resumoRow("Total Desconto Faltas", "- " + fmt(totalFaltas) + " Kz");
+    resumoRow("Total Descontos", "- " + fmt(totalDescontos) + " Kz");
 
     var ly = y;
     doc.rect(40, ly - 6, pw - 80, 26).fill("#eef2f7");
     doc.fillColor("#111111").font("Helvetica-Bold").fontSize(13);
     doc.text("TOTAL LIQUIDO A PAGAR", ml + 8, ly);
-    doc.text(fmt(totalLiquido) + " Kz", pw - 60 - 180, ly, { align: "right", width: 180 });
+    doc.text(fmt(totalLiquido) + " Kz", ml + 300, ly, { align: "right", width: 180 });
     y = ly + 26;
 
     doc.font("Helvetica").fontSize(9).fillColor("#666666");
@@ -1099,14 +1101,14 @@ exports.resumoPagamentos = async function (req, res) {
     // Tabela de detalhes
     addLine(doc, y); y += 6;
 
-    if (y > 560) { doc.addPage(); y = 50; }
+    if (y > 480) { doc.addPage(); y = 50; }
 
     doc.font("Helvetica-Bold").fontSize(11).fillColor("#333333");
     doc.text("DETALHE POR COLABORADOR", ml, y);
     y += 18;
 
-    var headers = ["N.", "Colaborador", "Salario Base", "Subsidios", "Extras", "IRT", "SS", "Faltas", "Liquido", "Estado"];
-    var colWidths = [30, 170, 70, 65, 55, 60, 55, 55, 70, 60];
+    var headers = ["N.", "Colaborador", "Salario Base", "Subsidios", "Extras", "IRT", "SS", "Descontos", "Faltas", "Liquido", "Estado"];
+    var colWidths = [25, 150, 70, 62, 55, 55, 55, 60, 55, 70, 65];
     var startX = 40;
     var tableW = pw - 80;
 
@@ -1136,7 +1138,7 @@ exports.resumoPagamentos = async function (req, res) {
 
     for (var r = 0; r < pagamentos.length; r++) {
       var p = pagamentos[r];
-      if (y > 740) {
+      if (y > 510) {
         doc.addPage();
         y = 50;
         drawRow(headers.slice(), y, true, false);
@@ -1152,6 +1154,7 @@ exports.resumoPagamentos = async function (req, res) {
         fmt(p.horas_extras),
         fmt(p.irt),
         fmt(p.seguranca_social),
+        fmt(p.descontos),
         fmt(p.desconto_faltas),
         fmt(p.total_liquido),
         p.estado,
@@ -1169,6 +1172,7 @@ exports.resumoPagamentos = async function (req, res) {
       fmt(totalExtras),
       fmt(totalIRT),
       fmt(totalSS),
+      fmt(totalDescontos),
       fmt(totalFaltas),
       fmt(totalLiquido),
       "",

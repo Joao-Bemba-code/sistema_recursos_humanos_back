@@ -147,19 +147,16 @@ var formatarDataLocal = function (d) {
   return ano + "-" + mes + "-" + dia;
 };
 
-// Calcula o desconto das faltas pendentes ate ao fim do mes processado.
-// Inclui faltas de meses anteriores ainda nao processadas (ficam descontadas
-// quando a folha do mes e processada). Se pagamentoId for passado (actualizacao/
-// recalculo), as faltas ja processadas por ESSE pagamento tambem contam.
+// Calcula o desconto de TODAS as faltas pendentes existentes no momento
+// do processamento (sem limite de data). Se pagamentoId for passado
+// (actualizacao/recalculo), as faltas ja processadas por ESSE pagamento
+// tambem contam.
 var calcularDescontoFaltas = async function (colaborador_id, mes, ano, pagamentoId) {
   try {
-    var strFim = formatarDataLocal(new Date(ano, mes, 0));
-
     var where = {
       colaborador_id: colaborador_id,
       estado: { [Op.in]: ["Ausente", "Atrasado"] },
       justificado: false,
-      data: { [Op.lte]: strFim },
     };
     if (pagamentoId) {
       where[Op.or] = [
@@ -208,18 +205,16 @@ var calcularDescontoFaltas = async function (colaborador_id, mes, ano, pagamento
   }
 };
 
-// Marca como processadas todas as faltas pendentes ate ao fim do mes/ano
+// Marca como processadas TODAS as faltas pendentes existentes no momento
 // (as mesmas que acabaram de ser descontadas na folha desse mes).
 var marcarFaltasProcessadas = async function (colaborador_id, mes, ano, transaction) {
   try {
-    var strFim = formatarDataLocal(new Date(ano, mes, 0));
     var opcoes = {
       where: {
         colaborador_id: colaborador_id,
         estado: { [Op.in]: ["Ausente", "Atrasado"] },
         justificado: false,
         processada: false,
-        data: { [Op.lte]: strFim },
       },
     };
     if (transaction) opcoes.transaction = transaction;
