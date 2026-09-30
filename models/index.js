@@ -209,8 +209,35 @@ var syncDatabase = async () => {
         await sequelize.query("ALTER TABLE `registos_presenca` ADD COLUMN `justificacao_observacoes` TEXT NULL");
         console.log(" Coluna 'justificacao_observacoes' adicionada!");
       }
+      if (nomesColunas.indexOf("processada") === -1) {
+        await sequelize.query("ALTER TABLE `registos_presenca` ADD COLUMN `processada` BOOLEAN NOT NULL DEFAULT false");
+        console.log(" Coluna 'processada' adicionada!");
+      }
+      if (nomesColunas.indexOf("processada_mes") === -1) {
+        await sequelize.query("ALTER TABLE `registos_presenca` ADD COLUMN `processada_mes` INT NULL");
+        console.log(" Coluna 'processada_mes' adicionada!");
+      }
+      if (nomesColunas.indexOf("processada_ano") === -1) {
+        await sequelize.query("ALTER TABLE `registos_presenca` ADD COLUMN `processada_ano` INT NULL");
+        console.log(" Coluna 'processada_ano' adicionada!");
+      }
     } catch (alterErr) {
       console.log(" Aviso: problema ao adicionar colunas de justificacao:", alterErr.message);
+    }
+
+    // Backfill idempotente: faltas/atrasos de meses que ja tem pagamento
+    // ficam marcados como processados (comportamento antigo de "mes processado")
+    try {
+      await sequelize.query(
+        "UPDATE `registos_presenca` rp " +
+        "INNER JOIN `pagamentos` p ON p.colaborador_id = rp.colaborador_id " +
+        "AND p.mes = MONTH(rp.data) AND p.ano = YEAR(rp.data) " +
+        "SET rp.processada = 1, rp.processada_mes = p.mes, rp.processada_ano = p.ano " +
+        "WHERE rp.processada = 0 AND rp.estado IN ('Ausente', 'Atrasado') AND rp.justificado = 0"
+      );
+      console.log(" Backfill de faltas processadas verificado!");
+    } catch (backfillErr) {
+      console.log(" Aviso: backfill de faltas processadas:", backfillErr.message);
     }
 
     try {

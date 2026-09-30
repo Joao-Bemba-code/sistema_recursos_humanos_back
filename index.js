@@ -166,8 +166,17 @@ app.listen(port, async function () {
 
   try {
     await migrations();
+  } catch (e) {
+    console.log(" Erro nas migracoes (continuando):", e.message);
+  }
+
+  try {
     await syncDatabase();
-    
+  } catch (e) {
+    console.log(" Erro ao sincronizar colunas (continuando):", e.message);
+  }
+
+  try {
     // CORREÇÃO: Execução condicional e segura do seed
     if (seed && typeof seed === "function") {
       await seed();
