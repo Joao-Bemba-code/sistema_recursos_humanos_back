@@ -750,7 +750,8 @@ var gerarPagamentosAutomaticos = async function (req, res) {
 
       var salarioBase = toNum(contrato.salario_base);
       var subsidios = toNum(contrato.subsidio_alimentacao);
-      var horasExtras = await calcularValorHorasExtras(colab.id, parseInt(mes), parseInt(ano), salarioBase);
+      // Horas extras: calculo automatico desactivado — fica a 0, preenchimento manual depois
+      var horasExtras = 0;
 
       var obrigatorios = calcularDescontosObrigatorios(salarioBase, subsidios, horasExtras, await temSegurancaSocial(colab.id));
       var descontoFaltas = await calcularDescontoFaltas(colab.id, parseInt(mes), parseInt(ano));
