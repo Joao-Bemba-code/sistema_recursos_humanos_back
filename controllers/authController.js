@@ -4,6 +4,14 @@ var { prepararUtilizador, fundirPermissoes, normalizarPermissoes } = require("..
 
 var SENHA_PADRAO = "colaborador123";
 
+// O perfil "Colaborador" e so para colaboradores sem funcao administrativa:
+// independentemente do que estiver guardado na BD, no login recebe apenas
+// permissoes do portal (evita que vejam os modulos de gestao).
+var PERMISSOES_COLABORADOR = {
+  portal: ["read", "update"],
+  ferias: ["create", "read"],
+};
+
 var generateToken = function (utilizador) {
   return jwt.sign(
     {
@@ -34,13 +42,17 @@ var serializarUtilizador = function (utilizador) {
   });
 
   var perfisJson = perfisTodos.map(function (p) {
+    var permissoes = normalizarPermissoes(p.permissoes);
+    if (String(p.nome || "").toLowerCase() === "colaborador") {
+      permissoes = PERMISSOES_COLABORADOR;
+    }
     return {
       id: p.id,
       nome: p.nome,
       descricao: p.descricao,
       nivel: p.nivel,
       activo: p.activo,
-      permissoes: normalizarPermissoes(p.permissoes),
+      permissoes: permissoes,
     };
   });
 

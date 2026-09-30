@@ -15,6 +15,7 @@ var { CicloAvaliacao, AvaliacaoDesempenho } = require("./Avaliacao");
 var { CursoFormacao, InscricaoFormacao } = require("./Formacao");
 var OcorrenciaDisciplinar = require("./Disciplinar");
 var { Vencimento, Pagamento } = require("./FolhaSalarial");
+var { Credito, CreditoMovimento } = require("./Credito");
 var { Aviso } = require("./Comunicacao");
 var Notificacao = require("./Notificacao");
 var PedidoColaborador = require("./PedidoColaborador");
@@ -133,6 +134,22 @@ Vencimento.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborad
 // Colaborador -> Pagamentos
 Colaborador.hasMany(Pagamento, { foreignKey: "colaborador_id", as: "pagamentos" });
 Pagamento.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador" });
+
+// Colaborador -> Creditos (sem FKs a nivel de BD para compatibilidade com TiDB)
+Colaborador.hasMany(Credito, { foreignKey: "colaborador_id", as: "creditos", constraints: false });
+Credito.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador", constraints: false });
+
+// Credito -> Movimentos
+Credito.hasMany(CreditoMovimento, { foreignKey: "credito_id", as: "movimentos", constraints: false });
+CreditoMovimento.belongsTo(Credito, { foreignKey: "credito_id", as: "credito", constraints: false });
+
+// Colaborador -> Movimentos de Credito
+Colaborador.hasMany(CreditoMovimento, { foreignKey: "colaborador_id", as: "movimentos_credito", constraints: false });
+CreditoMovimento.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador", constraints: false });
+
+// Pagamento -> Movimentos de Credito
+Pagamento.hasMany(CreditoMovimento, { foreignKey: "pagamento_id", as: "movimentos_credito", constraints: false });
+CreditoMovimento.belongsTo(Pagamento, { foreignKey: "pagamento_id", as: "pagamento", constraints: false });
 
 // Utilizador -> Notificacoes
 Utilizador.hasMany(Notificacao, { foreignKey: "utilizador_id", as: "notificacoes" });
@@ -383,6 +400,8 @@ module.exports = {
   OcorrenciaDisciplinar,
   Vencimento,
   Pagamento,
+  Credito,
+  CreditoMovimento,
   Aviso,
   Notificacao,
   PedidoColaborador,

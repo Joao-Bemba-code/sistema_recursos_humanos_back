@@ -87,6 +87,47 @@ var migrations = async function () {
     );
     console.log(" Tabela 'ocorrencias_disciplinares' garantida!");
 
+    // ==================== NOVO MODULO: CREDITOS ====================
+    // Sem FKs a nivel de BD para compatibilidade com TiDB; a integridade e gerida pela app
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `creditos` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`colaborador_id` CHAR(36) NOT NULL, " +
+      "`valor` DECIMAL(12,2) NOT NULL, " +
+      "`desconto_mensal` DECIMAL(12,2) NOT NULL, " +
+      "`valor_pago` DECIMAL(12,2) NOT NULL DEFAULT 0, " +
+      "`data_concessao` DATE NOT NULL, " +
+      "`motivo` TEXT NULL, " +
+      "`estado` ENUM('Ativo','Pago','Cancelado') NOT NULL DEFAULT 'Ativo', " +
+      "`criado_por` CHAR(36) NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "KEY `creditos_colaborador_idx` (`colaborador_id`), " +
+      "KEY `creditos_estado_idx` (`estado`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'creditos' garantida!");
+
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `creditos_movimentos` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`credito_id` CHAR(36) NOT NULL, " +
+      "`colaborador_id` CHAR(36) NOT NULL, " +
+      "`pagamento_id` CHAR(36) NULL, " +
+      "`mes` INT NOT NULL, " +
+      "`ano` INT NOT NULL, " +
+      "`valor_descontado` DECIMAL(12,2) NOT NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "UNIQUE KEY `creditos_movimentos_unique` (`credito_id`, `mes`, `ano`), " +
+      "KEY `creditos_movimentos_colaborador_idx` (`colaborador_id`), " +
+      "KEY `creditos_movimentos_pagamento_idx` (`pagamento_id`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'creditos_movimentos' garantida!");
+
     // ==================== NOVO MODULO: UTILIZADORES / PERFIS ====================
     // Garantir colunas do rbac nos utilizadores
     await adicionarColuna("utilizadores", "perfil_id", "CHAR(36) NULL");
@@ -97,6 +138,24 @@ var migrations = async function () {
     await adicionarColuna("registos_presenca", "justificado", "BOOLEAN NOT NULL DEFAULT false");
     await adicionarColuna("registos_presenca", "documento_justificacao", "VARCHAR(500) NULL");
     await adicionarColuna("registos_presenca", "justificacao_observacoes", "TEXT NULL");
+    await adicionarColuna("registos_presenca", "processada", "BOOLEAN NOT NULL DEFAULT false");
+    await adicionarColuna("registos_presenca", "processada_mes", "INT NULL");
+    await adicionarColuna("registos_presenca", "processada_ano", "INT NULL");
+
+    // Backfill idempotente: faltas/atrasos de meses que ja tem pagamento
+    // ficam marcados como processados (comportamento antigo de "mes processado")
+    try {
+      await sequelize.query(
+        "UPDATE `registos_presenca` rp " +
+        "INNER JOIN `pagamentos` p ON p.colaborador_id = rp.colaborador_id " +
+        "AND p.mes = MONTH(rp.data) AND p.ano = YEAR(rp.data) " +
+        "SET rp.processada = 1, rp.processada_mes = p.mes, rp.processada_ano = p.ano " +
+        "WHERE rp.processada = 0 AND rp.estado IN ('Ausente', 'Atrasado') AND rp.justificado = 0"
+      );
+      console.log(" Faltas/atrasos de meses ja processados marcados!");
+    } catch (e) {
+      console.log(" Aviso: backfill de faltas processadas:", e.message);
+    }
 
     // ==================== PAGAMENTOS ====================
     await adicionarColuna("pagamentos", "desconto_faltas", "DECIMAL(12,2) DEFAULT 0");

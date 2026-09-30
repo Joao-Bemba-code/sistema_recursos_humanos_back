@@ -1,42 +1,10 @@
 var { Op } = require("sequelize");
 var path = require("path");
 var fs = require("fs");
-var { sequelize, RegistoPresenca, Colaborador, Vencimento, Pagamento } = require("../models");
+var { sequelize, RegistoPresenca, Colaborador } = require("../models");
 
-var chaveProcessado = function (colaborador_id, mes, ano) {
-  return colaborador_id + "|" + mes + "|" + ano;
-};
-
-var buscarMesesProcessados = async function (faltas, atrasos) {
-  var chaves = {};
-  var registos = (faltas || []).concat(atrasos || []);
-  registos.forEach(function (r) {
-    var data = String(r.data || "");
-    var mes = parseInt(data.substring(5, 7), 10);
-    var ano = parseInt(data.substring(0, 4), 10);
-    if (mes && ano) {
-      chaves[chaveProcessado(r.colaborador.id, mes, ano)] = { colaborador_id: r.colaborador.id, mes: mes, ano: ano };
-    }
-  });
-
-  var ids = Object.values(chaves);
-  if (ids.length === 0) return new Set();
-
-  var pagamentos = await Pagamento.findAll({
-    where: {
-      [Op.or]: ids.map(function (p) {
-        return { colaborador_id: p.colaborador_id, mes: p.mes, ano: p.ano };
-      }),
-    },
-    attributes: ["colaborador_id", "mes", "ano"],
-  });
-
-  var processados = new Set();
-  pagamentos.forEach(function (p) {
-    processados.add(chaveProcessado(p.colaborador_id, p.mes, p.ano));
-  });
-  return processados;
-};
+// Uma falta fica "processada" (flag processada) quando a folha do mes que a
+// descontou e processada. Nao e preciso inferir a partir dos pagamentos.
 
 var resumo = async function (req, res) {
   try {
@@ -62,7 +30,7 @@ var resumo = async function (req, res) {
       include: [
         { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "utilizador_id"], where: { organizacao_id: org_id } },
       ],
-      attributes: ["id", "data", "observacoes", "justificado", "documento_justificacao", "justificacao_observacoes"],
+      attributes: ["id", "data", "observacoes", "justificado", "documento_justificacao", "justificacao_observacoes", "processada"],
       order: [["data", "DESC"]],
     });
 
@@ -71,7 +39,7 @@ var resumo = async function (req, res) {
       include: [
         { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "utilizador_id"], where: { organizacao_id: org_id } },
       ],
-      attributes: ["id", "data", "hora_entrada", "hora_saida", "horas_trabalhadas", "observacoes", "justificado", "documento_justificacao", "justificacao_observacoes"],
+      attributes: ["id", "data", "hora_entrada", "hora_saida", "horas_trabalhadas", "observacoes", "justificado", "documento_justificacao", "justificacao_observacoes", "processada"],
       order: [["data", "DESC"]],
     });
 
@@ -79,8 +47,6 @@ var resumo = async function (req, res) {
       where: { organizacao_id: org_id, estado: "Activo" },
       attributes: ["id", "nome_completo", "numero_colaborador"],
     });
-
-    var processados = await buscarMesesProcessados(faltas, atrasos);
 
     var resumoColab = {};
     colaboradores.forEach(function (c) {
@@ -108,10 +74,7 @@ var resumo = async function (req, res) {
     faltas.forEach(function (f) {
       var cid = f.colaborador.id;
       if (!resumoColab[cid]) return;
-      var data = String(f.data || "");
-      var mes = parseInt(data.substring(5, 7), 10);
-      var ano = parseInt(data.substring(0, 4), 10);
-      var jaProcessada = processados.has(chaveProcessado(cid, mes, ano));
+      var jaProcessada = f.processada || false;
       resumoColab[cid].total_faltas++;
       var justificado = f.justificado || false;
       if (justificado) {
@@ -137,10 +100,7 @@ var resumo = async function (req, res) {
     atrasos.forEach(function (a) {
       var cid = a.colaborador.id;
       if (!resumoColab[cid]) return;
-      var data = String(a.data || "");
-      var mes = parseInt(data.substring(5, 7), 10);
-      var ano = parseInt(data.substring(0, 4), 10);
-      var jaProcessada = processados.has(chaveProcessado(cid, mes, ano));
+      var jaProcessada = a.processada || false;
       resumoColab[cid].total_atrasos++;
       var mins = 0;
       if (a.hora_entrada) {

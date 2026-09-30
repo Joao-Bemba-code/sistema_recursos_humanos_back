@@ -15,6 +15,7 @@ var MODULOS_SISTEMA = [
   { chave: "formacao", nome: "Formação" },
   { chave: "folha_salarial", nome: "Folha Salarial" },
   { chave: "pedidos", nome: "Pedidos" },
+  { chave: "creditos", nome: "Créditos" },
   { chave: "advertencias", nome: "Advertências" },
   { chave: "utilizadores", nome: "Utilizadores" },
   { chave: "relatorios", nome: "Relatórios" },

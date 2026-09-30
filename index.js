@@ -32,6 +32,7 @@ var faltasRoutes = require("./routers/faltas");
 var pdfRoutes = require("./routers/pdf");
 var ocorrenciaRoutes = require("./routers/ocorrencias");
 var comunicacaoRoutes = require("./routers/comunicacoes");
+var creditoRoutes = require("./routers/creditos");
 
 // CORREÇÃO: Importação protegida do módulo seed para evitar o crash MODULE_NOT_FOUND
 var seed = null;
@@ -122,6 +123,7 @@ app.use("/api/faltas", authenticate, faltasRoutes);
 app.use("/api/pdf", authenticate, pdfRoutes);
 app.use("/api/ocorrencias", authenticate, ocorrenciaRoutes);
 app.use("/api/comunicados", authenticate, comunicacaoRoutes);
+app.use("/api/creditos", authenticate, creditoRoutes);
 
 // Health check
 app.get("/health", function (req, res) {

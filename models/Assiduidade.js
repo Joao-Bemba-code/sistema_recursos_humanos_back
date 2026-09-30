@@ -51,6 +51,18 @@ var RegistoPresenca = sequelize.define("RegistoPresenca", {
     type: DataTypes.TEXT,
     allowNull: true,
   },
+  processada: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
+  processada_mes: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  processada_ano: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
 }, {
   tableName: "registos_presenca",
   timestamps: true,

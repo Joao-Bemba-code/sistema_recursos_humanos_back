@@ -1,5 +1,6 @@
 var { Op } = require("sequelize");
-var { sequelize, Vencimento, Pagamento, Colaborador, RegistoPresenca } = require("../models");
+var { sequelize, Vencimento, Pagamento, Colaborador, RegistoPresenca, Credito, CreditoMovimento } = require("../models");
+var { calcularDescontosCreditos, registarDescontosCreditos } = require("./creditoController");
 
 // ==================== IMPOSTOS ANGOLA (IRT 2026 / INSS) ====================
 
@@ -36,12 +37,21 @@ var calcularIRT = function (base) {
   return 0;
 };
 
-var calcularDescontosObrigatorios = function (salarioBase, subsidios, horasExtras) {
+var temSegurancaSocial = async function (colaborador_id) {
+  try {
+    var colab = await Colaborador.findByPk(colaborador_id, { attributes: ["numero_seguranca_social"] });
+    return !!colab && colab.numero_seguranca_social && String(colab.numero_seguranca_social).trim() !== "";
+  } catch (e) {
+    return false;
+  }
+};
+
+var calcularDescontosObrigatorios = function (salarioBase, subsidios, horasExtras, aplicarSegurancaSocial) {
   var sb = parseFloat(salarioBase) || 0;
   var sub = parseFloat(subsidios) || 0;
   var he = parseFloat(horasExtras) || 0;
   var bruto = sb + sub + he;
-  var ss = calcularSegurancaSocial(bruto);
+  var ss = aplicarSegurancaSocial ? calcularSegurancaSocial(bruto) : 0;
   var subsidiosTributaveis = Math.max(0, sub - ISENCAO_SUBSIDIO_ALIMENTACAO);
   var baseIRT = sb + he + subsidiosTributaveis - ss;
   if (baseIRT < 0) baseIRT = 0;
@@ -137,20 +147,31 @@ var formatarDataLocal = function (d) {
   return ano + "-" + mes + "-" + dia;
 };
 
-var calcularDescontoFaltas = async function (colaborador_id, mes, ano) {
+// Calcula o desconto das faltas pendentes ate ao fim do mes processado.
+// Inclui faltas de meses anteriores ainda nao processadas (ficam descontadas
+// quando a folha do mes e processada). Se pagamentoId for passado (actualizacao/
+// recalculo), as faltas ja processadas por ESSE pagamento tambem contam.
+var calcularDescontoFaltas = async function (colaborador_id, mes, ano, pagamentoId) {
   try {
-    var dataInicio = new Date(ano, mes - 1, 1);
-    var dataFim = new Date(ano, mes, 0);
-    var strInicio = formatarDataLocal(dataInicio);
-    var strFim = formatarDataLocal(dataFim);
+    var strFim = formatarDataLocal(new Date(ano, mes, 0));
+
+    var where = {
+      colaborador_id: colaborador_id,
+      estado: { [Op.in]: ["Ausente", "Atrasado"] },
+      justificado: false,
+      data: { [Op.lte]: strFim },
+    };
+    if (pagamentoId) {
+      where[Op.or] = [
+        { processada: false },
+        { processada_mes: mes, processada_ano: ano },
+      ];
+    } else {
+      where.processada = false;
+    }
 
     var faltas = await RegistoPresenca.findAll({
-      where: {
-        colaborador_id: colaborador_id,
-        estado: { [Op.in]: ["Ausente", "Atrasado"] },
-        justificado: false,
-        data: { [Op.between]: [strInicio, strFim] },
-      },
+      where: where,
       attributes: ["id", "data", "estado", "hora_entrada"],
     });
 
@@ -184,6 +205,30 @@ var calcularDescontoFaltas = async function (colaborador_id, mes, ano) {
   } catch (e) {
     console.log("Erro ao calcular desconto de faltas:", e.message);
     return 0;
+  }
+};
+
+// Marca como processadas todas as faltas pendentes ate ao fim do mes/ano
+// (as mesmas que acabaram de ser descontadas na folha desse mes).
+var marcarFaltasProcessadas = async function (colaborador_id, mes, ano, transaction) {
+  try {
+    var strFim = formatarDataLocal(new Date(ano, mes, 0));
+    var opcoes = {
+      where: {
+        colaborador_id: colaborador_id,
+        estado: { [Op.in]: ["Ausente", "Atrasado"] },
+        justificado: false,
+        processada: false,
+        data: { [Op.lte]: strFim },
+      },
+    };
+    if (transaction) opcoes.transaction = transaction;
+    await RegistoPresenca.update(
+      { processada: true, processada_mes: mes, processada_ano: ano },
+      opcoes
+    );
+  } catch (e) {
+    console.log("Erro ao marcar faltas como processadas:", e.message);
   }
 };
 
@@ -417,6 +462,8 @@ var createPagamento = async function (req, res) {
     }
 
     var toNum = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; };
+    // Se o desconto nao for informado manualmente, aplica-se o desconto automatico dos creditos activos
+    var descontosManuais = dados.descontos !== undefined && dados.descontos !== null && dados.descontos !== "";
     dados.salario_base = toNum(dados.salario_base);
     dados.subsidios = toNum(dados.subsidios);
     if (dados.horas_extras === undefined || dados.horas_extras === null || dados.horas_extras === "") {
@@ -426,21 +473,46 @@ var createPagamento = async function (req, res) {
     }
     dados.descontos = toNum(dados.descontos);
 
-    var obrigatorios = calcularDescontosObrigatorios(dados.salario_base, dados.subsidios, dados.horas_extras);
+    var obrigatorios = calcularDescontosObrigatorios(dados.salario_base, dados.subsidios, dados.horas_extras, await temSegurancaSocial(dados.colaborador_id));
     dados.seguranca_social = obrigatorios.seguranca_social;
     dados.irt = obrigatorios.irt;
 
     var descontoFaltas = await calcularDescontoFaltas(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano));
     dados.desconto_faltas = descontoFaltas;
 
-    dados.total_liquido = Math.round((dados.salario_base + dados.subsidios + dados.horas_extras - dados.descontos - dados.irt - dados.seguranca_social - descontoFaltas) * 100) / 100;
+    var maxDesconto = Math.max(0, Math.round((dados.salario_base + dados.subsidios + dados.horas_extras - dados.irt - dados.seguranca_social - descontoFaltas) * 100) / 100);
 
-    var pagamento = await Pagamento.create(dados);
+    var t = await sequelize.transaction();
+    try {
+      var descontoCreditos = 0;
 
-    return res.status(201).json({
-      mensagem: "Pagamento criado com sucesso",
-      dados: pagamento,
-    });
+      if (!descontosManuais) {
+        var creditos = await calcularDescontosCreditos(dados.colaborador_id, maxDesconto, { transaction: t });
+        dados.descontos = creditos.total;
+        descontoCreditos = creditos.total;
+      }
+
+      dados.total_liquido = Math.round((dados.salario_base + dados.subsidios + dados.horas_extras - dados.descontos - dados.irt - dados.seguranca_social - descontoFaltas) * 100) / 100;
+
+      var pagamento = await Pagamento.create(dados, { transaction: t });
+
+      if (!descontosManuais && descontoCreditos > 0) {
+        await registarDescontosCreditos(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano), pagamento.id, maxDesconto, t);
+      }
+
+      // Marca as faltas descontadas como processadas (desaparecem dos descontos pendentes)
+      await marcarFaltasProcessadas(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano), t);
+
+      await t.commit();
+
+      return res.status(201).json({
+        mensagem: "Pagamento criado com sucesso",
+        dados: pagamento,
+      });
+    } catch (e) {
+      await t.rollback();
+      throw e;
+    }
   } catch (e) {
     console.log("Erro ao criar pagamento:", e.message);
     if (e.name === "SequelizeUniqueConstraintError") {
@@ -474,19 +546,21 @@ var updatePagamento = async function (req, res) {
     var he = toNum(dadosActualizar.horas_extras !== undefined ? dadosActualizar.horas_extras : pagamento.horas_extras);
     var desc = toNum(dadosActualizar.descontos !== undefined ? dadosActualizar.descontos : pagamento.descontos);
 
-    var obrigatorios = calcularDescontosObrigatorios(sb, sub, he);
+    var obrigatorios = calcularDescontosObrigatorios(sb, sub, he, await temSegurancaSocial(pagamento.colaborador_id));
     dadosActualizar.seguranca_social = obrigatorios.seguranca_social;
     dadosActualizar.irt = obrigatorios.irt;
 
     var colId = pagamento.colaborador_id;
     var mesAtual = dadosActualizar.mes !== undefined ? parseInt(dadosActualizar.mes) : pagamento.mes;
     var anoAtual = dadosActualizar.ano !== undefined ? parseInt(dadosActualizar.ano) : pagamento.ano;
-    var descontoFaltas = await calcularDescontoFaltas(colId, mesAtual, anoAtual);
+    var descontoFaltas = await calcularDescontoFaltas(colId, mesAtual, anoAtual, pagamento.id);
     dadosActualizar.desconto_faltas = descontoFaltas;
 
     dadosActualizar.total_liquido = Math.round((sb + sub + he - desc - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas) * 100) / 100;
 
     await pagamento.update(dadosActualizar);
+
+    await marcarFaltasProcessadas(colId, mesAtual, anoAtual);
 
     var actualizado = await Pagamento.findByPk(req.params.id, {
       include: [
@@ -511,7 +585,7 @@ var recalcularFaltas = async function (req, res) {
       return res.status(404).json({ error: "Pagamento nao encontrado" });
     }
 
-    var descontoFaltas = await calcularDescontoFaltas(pagamento.colaborador_id, pagamento.mes, pagamento.ano);
+    var descontoFaltas = await calcularDescontoFaltas(pagamento.colaborador_id, pagamento.mes, pagamento.ano, pagamento.id);
 
     var sb = parseFloat(pagamento.salario_base) || 0;
     var sub = parseFloat(pagamento.subsidios) || 0;
@@ -525,6 +599,8 @@ var recalcularFaltas = async function (req, res) {
       desconto_faltas: descontoFaltas,
       total_liquido: totalLiquido,
     });
+
+    await marcarFaltasProcessadas(pagamento.colaborador_id, pagamento.mes, pagamento.ano);
 
     var actualizado = await Pagamento.findByPk(req.params.id, {
       include: [
@@ -543,14 +619,48 @@ var recalcularFaltas = async function (req, res) {
 };
 
 var removePagamento = async function (req, res) {
+  var t = await sequelize.transaction();
   try {
-    var pagamento = await Pagamento.findByPk(req.params.id);
+    var pagamento = await Pagamento.findByPk(req.params.id, { transaction: t });
     if (!pagamento) {
+      await t.rollback();
       return res.status(404).json({ error: "Pagamento nao encontrado" });
     }
-    await pagamento.destroy();
+
+    // Reverte os descontos de credito associados a este pagamento
+    var movimentos = await CreditoMovimento.findAll({ where: { pagamento_id: pagamento.id }, transaction: t });
+
+    for (var i = 0; i < movimentos.length; i++) {
+      var m = movimentos[i];
+      var credito = await Credito.findByPk(m.credito_id, { transaction: t });
+      if (credito) {
+        var novoPago = Math.max(0, Math.round((parseFloat(credito.valor_pago || 0) - parseFloat(m.valor_descontado || 0)) * 100) / 100);
+        var novoEstado = credito.estado === "Cancelado" ? "Cancelado" : "Ativo";
+        await credito.update({ valor_pago: novoPago, estado: novoEstado }, { transaction: t });
+      }
+      await m.destroy({ transaction: t });
+    }
+
+    // Reabre as faltas que este pagamento tinha marcado como processadas
+    // (voltam a aparecer como descontos pendentes)
+    await RegistoPresenca.update(
+      { processada: false, processada_mes: null, processada_ano: null },
+      {
+        where: {
+          colaborador_id: pagamento.colaborador_id,
+          processada: true,
+          processada_mes: pagamento.mes,
+          processada_ano: pagamento.ano,
+        },
+        transaction: t,
+      }
+    );
+
+    await pagamento.destroy({ transaction: t });
+    await t.commit();
     return res.status(200).json({ mensagem: "Pagamento eliminado com sucesso" });
   } catch (e) {
+    await t.rollback();
     console.log("Erro ao eliminar pagamento:", e.message);
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
@@ -586,6 +696,12 @@ var gerarPagamentosAutomaticos = async function (req, res) {
       return res.status(400).json({ error: "mes e ano sao obrigatorios" });
     }
 
+    // Se marcar_pago for true, os pagamentos sao criados ja como "Pago" e os
+    // pendentes existentes desse mes/ano tambem sao marcados como pagos.
+    var marcarPago = req.body.marcar_pago === true || req.body.marcar_pago === "true";
+    var estadoPagamento = marcarPago ? "Pago" : "Pendente";
+    var dataPagamento = marcarPago ? formatarDataLocal(new Date()) : null;
+
     // Colaboradores ativos
     var colaboradores = await Colaborador.findAll({
       where: { estado: "Activo" },
@@ -601,6 +717,7 @@ var gerarPagamentosAutomaticos = async function (req, res) {
     var criados = [];
     var ignorados = [];
     var erros = [];
+    var marcadosPago = [];
 
     for (var i = 0; i < colaboradores.length; i++) {
       var colab = colaboradores[i];
@@ -611,13 +728,18 @@ var gerarPagamentosAutomaticos = async function (req, res) {
         transaction: t,
       });
       if (existente) {
+        if (marcarPago && existente.estado === "Pendente") {
+          await existente.update({ estado: "Pago", data_pagamento: dataPagamento }, { transaction: t });
+          marcadosPago.push({ colaborador_id: colab.id, id: existente.id });
+          continue;
+        }
         ignorados.push({ colaborador_id: colab.id, motivo: "Ja existe pagamento" });
         continue;
       }
 
       var contrato = await getSalarioContrato(colab.id);
       if (!contrato || !contrato.salario_base) {
-        erros.push({ colaborador_id: colab.id, motivo: "Sem contrato ativo com salario" });
+        erros.push({ colaborador_id: colab.id, motivo: "Sem contrato ativo com salario definido" });
         continue;
       }
 
@@ -625,9 +747,13 @@ var gerarPagamentosAutomaticos = async function (req, res) {
       var subsidios = toNum(contrato.subsidio_alimentacao);
       var horasExtras = await calcularValorHorasExtras(colab.id, parseInt(mes), parseInt(ano), salarioBase);
 
-      var obrigatorios = calcularDescontosObrigatorios(salarioBase, subsidios, horasExtras);
+      var obrigatorios = calcularDescontosObrigatorios(salarioBase, subsidios, horasExtras, await temSegurancaSocial(colab.id));
       var descontoFaltas = await calcularDescontoFaltas(colab.id, parseInt(mes), parseInt(ano));
-      var totalLiquido = Math.round((salarioBase + subsidios + horasExtras - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas) * 100) / 100;
+
+      // Desconto automatico de creditos activos (limitado para o liquido nao ficar negativo)
+      var maxDesconto = Math.max(0, Math.round((salarioBase + subsidios + horasExtras - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas) * 100) / 100);
+      var creditos = await calcularDescontosCreditos(colab.id, maxDesconto, { transaction: t });
+      var totalLiquido = Math.round((salarioBase + subsidios + horasExtras - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas - creditos.total) * 100) / 100;
 
       var pagamentoDados = {
         colaborador_id: colab.id,
@@ -636,22 +762,36 @@ var gerarPagamentosAutomaticos = async function (req, res) {
         salario_base: salarioBase,
         subsidios: subsidios,
         horas_extras: horasExtras,
-        descontos: 0,
+        descontos: creditos.total,
         irt: obrigatorios.irt,
         seguranca_social: obrigatorios.seguranca_social,
         desconto_faltas: descontoFaltas,
         total_liquido: totalLiquido,
-        estado: "Pendente",
+        estado: estadoPagamento,
+        data_pagamento: dataPagamento,
       };
 
       try {
         var pagamento = await Pagamento.create(pagamentoDados, { transaction: t });
-        criados.push({ colaborador_id: colab.id, total_liquido: totalLiquido, id: pagamento.id });
+
+        // Regista os descontos de credito (movimentos + actualizacao de valor_pago/estado)
+        if (creditos.total > 0) {
+          await registarDescontosCreditos(colab.id, parseInt(mes), parseInt(ano), pagamento.id, maxDesconto, t);
+        }
+
+        // Marca as faltas descontadas como processadas (desaparecem dos descontos pendentes)
+        await marcarFaltasProcessadas(colab.id, parseInt(mes), parseInt(ano), t);
+
+        criados.push({ colaborador_id: colab.id, total_liquido: totalLiquido, desconto_creditos: creditos.total, id: pagamento.id });
       } catch (erroInterno) {
-        if (erroInterno.name === "SequelizeUniqueConstraintError") {
+        var campos = (erroInterno.fields && Object.keys(erroInterno.fields)) || [];
+        var conflitoPagamento = erroInterno.name === "SequelizeUniqueConstraintError" && campos.indexOf("credito_id") === -1;
+        if (conflitoPagamento) {
           ignorados.push({ colaborador_id: colab.id, motivo: "Ja existe pagamento" });
         } else {
-          erros.push({ colaborador_id: colab.id, motivo: erroInterno.message });
+          await t.rollback();
+          console.log("Erro ao processar pagamento de", colab.id, ":", erroInterno.message);
+          return res.status(500).json({ error: "Erro ao processar pagamentos: " + erroInterno.message });
         }
       }
     }
@@ -665,6 +805,7 @@ var gerarPagamentosAutomaticos = async function (req, res) {
         criados: criados.length,
         ignorados: ignorados.length,
         erros: erros.length,
+        marcados_pago: marcadosPago.length,
         pagamentos_criados: criados,
         ignorados_detalhe: ignorados,
         erros_detalhe: erros,
