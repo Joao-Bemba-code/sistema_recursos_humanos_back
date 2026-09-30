@@ -151,7 +151,7 @@ var formatarDataLocal = function (d) {
 // do processamento (sem limite de data). Se pagamentoId for passado
 // (actualizacao/recalculo), as faltas ja processadas por ESSE pagamento
 // tambem contam.
-var calcularDescontoFaltas = async function (colaborador_id, mes, ano, pagamentoId) {
+var calcularDescontoFaltas = async function (colaborador_id, mes, ano, pagamentoId, apenasMes) {
   try {
     var where = {
       colaborador_id: colaborador_id,
@@ -165,6 +165,12 @@ var calcularDescontoFaltas = async function (colaborador_id, mes, ano, pagamento
       ];
     } else {
       where.processada = false;
+    }
+    // Modo "restaurar folha": desconta apenas as faltas/atrasos do proprio mes
+    if (apenasMes) {
+      where.data = {
+        [Op.between]: [formatarDataLocal(new Date(ano, mes - 1, 1)), formatarDataLocal(new Date(ano, mes, 0))],
+      };
     }
 
     var faltas = await RegistoPresenca.findAll({
@@ -207,7 +213,8 @@ var calcularDescontoFaltas = async function (colaborador_id, mes, ano, pagamento
 
 // Marca como processadas TODAS as faltas pendentes existentes no momento
 // (as mesmas que acabaram de ser descontadas na folha desse mes).
-var marcarFaltasProcessadas = async function (colaborador_id, mes, ano, transaction) {
+// Com apenasMes=true, marca apenas as faltas/atrasos do proprio mes (restaurar folha).
+var marcarFaltasProcessadas = async function (colaborador_id, mes, ano, transaction, apenasMes) {
   try {
     var opcoes = {
       where: {
@@ -217,6 +224,11 @@ var marcarFaltasProcessadas = async function (colaborador_id, mes, ano, transact
         processada: false,
       },
     };
+    if (apenasMes) {
+      opcoes.where.data = {
+        [Op.between]: [formatarDataLocal(new Date(ano, mes - 1, 1)), formatarDataLocal(new Date(ano, mes, 0))],
+      };
+    }
     if (transaction) opcoes.transaction = transaction;
     await RegistoPresenca.update(
       { processada: true, processada_mes: mes, processada_ano: ano },
@@ -472,7 +484,8 @@ var createPagamento = async function (req, res) {
     dados.seguranca_social = obrigatorios.seguranca_social;
     dados.irt = obrigatorios.irt;
 
-    var descontoFaltas = await calcularDescontoFaltas(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano));
+    var apenasMes = dados.apenas_mes === true || dados.apenas_mes === "true" || dados.apenas_mes === 1 || dados.apenas_mes === "1";
+    var descontoFaltas = await calcularDescontoFaltas(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano), null, apenasMes);
     dados.desconto_faltas = descontoFaltas;
 
     var maxDesconto = Math.max(0, Math.round((dados.salario_base + dados.subsidios + dados.horas_extras - dados.irt - dados.seguranca_social - descontoFaltas) * 100) / 100);
@@ -496,7 +509,7 @@ var createPagamento = async function (req, res) {
       }
 
       // Marca as faltas descontadas como processadas (desaparecem dos descontos pendentes)
-      await marcarFaltasProcessadas(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano), t);
+      await marcarFaltasProcessadas(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano), t, apenasMes);
 
       await t.commit();
 
@@ -839,7 +852,8 @@ var previewDescontoFaltas = async function (req, res) {
     if (!colaborador_id || !mes || !ano) {
       return res.status(400).json({ error: "colaborador_id, mes e ano sao obrigatorios" });
     }
-    var desconto = await calcularDescontoFaltas(colaborador_id, parseInt(mes), parseInt(ano));
+    var apenasMes = req.query.apenas_mes === "true" || req.query.apenas_mes === "1";
+    var desconto = await calcularDescontoFaltas(colaborador_id, parseInt(mes), parseInt(ano), null, apenasMes);
     return res.status(200).json({ dados: { desconto_faltas: desconto } });
   } catch (e) {
     console.log("Erro ao preview desconto faltas:", e.message);
