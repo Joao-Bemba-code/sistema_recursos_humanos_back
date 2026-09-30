@@ -473,11 +473,8 @@ var createPagamento = async function (req, res) {
     var descontosManuais = dados.descontos !== undefined && dados.descontos !== null && dados.descontos !== "";
     dados.salario_base = toNum(dados.salario_base);
     dados.subsidios = toNum(dados.subsidios);
-    if (dados.horas_extras === undefined || dados.horas_extras === null || dados.horas_extras === "") {
-      dados.horas_extras = await calcularValorHorasExtras(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano), dados.salario_base);
-    } else {
-      dados.horas_extras = toNum(dados.horas_extras);
-    }
+    // Horas extras: preenchimento manual (desactivado o calculo automatico) — vazio fica 0
+    dados.horas_extras = toNum(dados.horas_extras);
     dados.descontos = toNum(dados.descontos);
 
     var obrigatorios = calcularDescontosObrigatorios(dados.salario_base, dados.subsidios, dados.horas_extras, await temSegurancaSocial(dados.colaborador_id));
