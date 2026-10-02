@@ -230,6 +230,18 @@ var syncDatabase = async () => {
         await sequelize.query("ALTER TABLE `registos_presenca` ADD COLUMN `ajustado_manual` BOOLEAN NOT NULL DEFAULT false");
         console.log(" Coluna 'ajustado_manual' adicionada!");
       }
+      // ENUM de estados: acrescenta 'Em_Curso' (dia a decorrer, ainda sem hora de saida)
+      var rEstado = await sequelize.query("SHOW COLUMNS FROM `registos_presenca` LIKE 'estado'");
+      var linhasEstado = Array.isArray(rEstado[0]) ? rEstado[0] : rEstado;
+      var tipoEstado = linhasEstado.length ? String(linhasEstado[0].Type || "") : "";
+      if (tipoEstado && tipoEstado.indexOf("Em_Curso") === -1) {
+        await sequelize.query(
+          "ALTER TABLE `registos_presenca` MODIFY COLUMN `estado` " +
+          "ENUM('Presente','Ausente','Atrasado','Licenca','Ferias','Fim_semana','Em_Curso') " +
+          "NULL DEFAULT 'Presente'"
+        );
+        console.log(" ENUM 'estado' com 'Em_Curso' garantido!");
+      }
     } catch (alterErr) {
       console.log(" Aviso: problema ao adicionar colunas de justificacao:", alterErr.message);
     }

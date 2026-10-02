@@ -2,7 +2,7 @@ var { Op } = require("sequelize");
 var { RegistoPresenca, Colaborador } = require("../models");
 
 // Valores aceitos pela coluna ENUM no MySQL (sem acentos).
-var ESTADOS_VALIDOS = ["Presente", "Ausente", "Atrasado", "Licenca", "Ferias", "Fim_semana"];
+var ESTADOS_VALIDOS = ["Presente", "Ausente", "Atrasado", "Licenca", "Ferias", "Fim_semana", "Em_Curso"];
 var METODOS_VALIDOS = ["Manual", "Biometrico", "GPS", "QR_Code"];
 
 // Campos que o utilizador pode gravar (o resto e interno: processada, ajustado_manual...)
@@ -23,6 +23,7 @@ var canonico = function (valor) {
 var VARIANTES_ESTADO = {
   presente: "Presente", ausente: "Ausente", atrasado: "Atrasado",
   licenca: "Licenca", ferias: "Ferias", fim_de_semana: "Fim_semana",
+  em_curso: "Em_Curso",
 };
 var VARIANTES_METODO = {
   manual: "Manual", biometrico: "Biometrico", gps: "GPS", qr_code: "QR_Code",

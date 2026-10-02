@@ -28,7 +28,7 @@ var RegistoPresenca = sequelize.define("RegistoPresenca", {
     defaultValue: 0,
   },
   estado: {
-    type: DataTypes.ENUM("Presente", "Ausente", "Atrasado", "Licenca", "Ferias", "Fim_semana"),
+    type: DataTypes.ENUM("Presente", "Ausente", "Atrasado", "Licenca", "Ferias", "Fim_semana", "Em_Curso"),
     defaultValue: "Presente",
   },
   metodo: {

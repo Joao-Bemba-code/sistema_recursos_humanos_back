@@ -144,6 +144,22 @@ var migrations = async function () {
     // Registo corrigido a mao pelo RH: o biometro deixa de mexer nele
     await adicionarColuna("registos_presenca", "ajustado_manual", "BOOLEAN NOT NULL DEFAULT false");
 
+    // ENUM 'estado': acrescenta 'Em_Curso' (dia a decorrer, ainda sem hora de saida)
+    try {
+      var rEstado = await sequelize.query("SHOW COLUMNS FROM `registos_presenca` LIKE 'estado'");
+      var colEstado = Array.isArray(rEstado[0]) ? rEstado[0] : rEstado;
+      if (colEstado.length && String(colEstado[0].Type || "").indexOf("Em_Curso") === -1) {
+        await sequelize.query(
+          "ALTER TABLE `registos_presenca` MODIFY COLUMN `estado` " +
+          "ENUM('Presente','Ausente','Atrasado','Licenca','Ferias','Fim_semana','Em_Curso') " +
+          "NULL DEFAULT 'Presente'"
+        );
+        console.log(" ENUM 'estado' com 'Em_Curso' garantido!");
+      }
+    } catch (eEstado) {
+      console.log(" Aviso: nao foi possivel actualizar o ENUM 'estado':", eEstado.message);
+    }
+
     // Backfill idempotente: faltas/atrasos de meses que ja tem pagamento
     // ficam marcados como processados (comportamento antigo de "mes processado")
     try {

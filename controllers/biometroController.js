@@ -2,12 +2,18 @@ var { Op } = require("sequelize");
 var { PicagemBiometrico, Colaborador, RegistoPresenca } = require("../models");
 
 // Horario de trabalho (configuravel por env): entrada 08:00, saida 16:00.
-// Quem entra depois da hora de entrada fica "Atrasado" e a saida esperada
-// prolonga o tempo do atraso (ex.: entra 08:40 -> saida esperada 16:40).
+// Ha uma TOLERANCIA de entrada (por omissao 40 min): quem entra ate as 08:40
+// ainda conta como "Presente"; so depois disso fica "Atrasado".
+// A saida esperada prolonga o tempo do atraso (ex.: entra 08:40 -> sai 16:40).
+// Enquanto o dia de hoje esta a decorrer (ja tem entrada, ainda sem saida) o
+// estado e "Em_Curso" — nao e Presente nem Atrasado, porque ainda pode mudar.
 var HORARIO_ENTRADA = (process.env.HORARIO_ENTRADA || "08:00").slice(0, 5);
 var HORARIO_SAIDA = (process.env.HORARIO_SAIDA || "16:00").slice(0, 5);
+var TOLERANCIA_MINUTOS = parseInt(process.env.TOLERANCIA_ENTRADA || "40", 10);
+if (isNaN(TOLERANCIA_MINUTOS) || TOLERANCIA_MINUTOS < 0) TOLERANCIA_MINUTOS = 40;
 
-// Converte "HH:MM" em minutos desde a meia-noite
+// Converte "HH:MM" (ou "HH:MM:SS") em minutos desde a meia-noite — ignora os
+// segundos, para a tolerancia ser contada por minuto inteiro (08:40:15 = 08:40).
 var paraMinutos = function (hora) {
   if (!hora) return null;
   var partes = String(hora).split(":");
@@ -24,31 +30,48 @@ var deMinutos = function (minutos) {
   return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
 };
 
-// Classifica o estado pela hora de entrada: depois da hora definida = Atrasado
-var classificarEstado = function (horaEntrada) {
+// O dia ainda esta a decorrer? (estado provisorio: tem entrada, ainda sem saida)
+var diaEmCurso = function (data, temSaida) {
+  if (temSaida) return false;
+  return !data || data === dataLocal(new Date());
+};
+
+// Classifica o estado:
+//   - sem hora de entrada                -> Ausente
+//   - dia de hoje ainda sem hora de saida -> Em_Curso (provisorio, pode mudar)
+//   - entrada depois da hora + tolerancia -> Atrasado
+//   - resto                              -> Presente
+var classificarEstado = function (horaEntrada, temSaida, data) {
   var minutosEntrada = paraMinutos(horaEntrada);
+  if (minutosEntrada === null) return "Ausente";
+  if (diaEmCurso(data, temSaida)) return "Em_Curso";
   var minutosLimite = paraMinutos(HORARIO_ENTRADA);
-  if (minutosEntrada === null || minutosLimite === null) return "Presente";
-  return minutosEntrada > minutosLimite ? "Atrasado" : "Presente";
+  if (minutosLimite === null) return "Presente";
+  return minutosEntrada > minutosLimite + TOLERANCIA_MINUTOS ? "Atrasado" : "Presente";
 };
 
 // Observacao automatica: indica o atraso e a saida esperada (prolongamento)
-var observacaoAutomatica = function (horaEntrada) {
+var observacaoAutomatica = function (horaEntrada, temSaida, data) {
   var minutosEntrada = paraMinutos(horaEntrada);
   var minutosLimite = paraMinutos(HORARIO_ENTRADA);
   var minutosSaida = paraMinutos(HORARIO_SAIDA);
-  if (minutosEntrada === null || minutosLimite === null || minutosSaida === null) {
-    return "Registo automático do biómetro";
-  }
-  if (minutosEntrada <= minutosLimite) {
-    return "Registo automático do biómetro";
-  }
-  var atraso = minutosEntrada - minutosLimite;
+  if (minutosEntrada === null) return "Registo automático do biómetro";
+  if (diaEmCurso(data, temSaida)) return "Registo automático do biómetro — em curso (ainda sem hora de saída)";
+  if (minutosLimite === null || minutosSaida === null) return "Registo automático do biómetro";
+  if (minutosEntrada <= minutosLimite + TOLERANCIA_MINUTOS) return "Registo automático do biómetro";
+  var atraso = minutosEntrada - (minutosLimite + TOLERANCIA_MINUTOS);
   var jornada = minutosSaida - minutosLimite;
   if (jornada < 0) jornada += 24 * 60;
   var saidaEsperada = deMinutos(minutosEntrada + jornada);
   return "Registo automático do biómetro — Atraso de " + atraso + " min (saída esperada " + saidaEsperada + ")";
 };
+
+// A observacao foi escrita pelo biometro (pode ser reescrita) ou pelo RH (nao se toca)?
+var ehObservacaoAutomatica = function (texto) {
+  if (!texto) return true;
+  return String(texto).indexOf("automático do biómetro") !== -1;
+};
+
 
 // Formata uma Date para "HH:MM:SS" (hora local do servidor)
 var horaLocal = function (d) {
@@ -90,8 +113,8 @@ var calcularHorasTrabalhadas = function (horaEntrada, horaSaida) {
 var sincronizar = async function (req, res) {
   try {
     var picagens = req.body && req.body.picagens;
-    if (!Array.isArray(picagens) || picagens.length === 0) {
-      return res.status(400).json({ error: "Esperado um array 'picagens' nao vazio" });
+    if (!Array.isArray(picagens)) {
+      return res.status(400).json({ error: "Esperado um array 'picagens'" });
     }
     if (picagens.length > 10000) {
       return res.status(400).json({ error: "Lote demasiado grande (maximo 10000 picagens)" });
@@ -131,7 +154,10 @@ var sincronizar = async function (req, res) {
       }
     }
 
+    // Lote vazio: a ponte so quer que o servidor reclassifique os estados
+    // (tolerancia de entrada / "Em curso" do dia de hoje), sem picagens novas.
     if (novas === 0) {
+      var reclassificados = await reclassificarAutomaticos();
       return res.status(200).json({
         mensagem: "Nenhuma picagem nova",
         recebidas: recebidas,
@@ -141,6 +167,7 @@ var sincronizar = async function (req, res) {
         registos_criados: 0,
         registos_actualizados: 0,
         ausentes_criados: 0,
+        reclassificados: reclassificados,
       });
     }
 
@@ -194,9 +221,9 @@ var sincronizar = async function (req, res) {
           hora_saida: saida,
           horas_trabalhadas: calcularHorasTrabalhadas(entrada, saida),
           horas_extras: 0,
-          estado: classificarEstado(entrada),
+          estado: classificarEstado(entrada, !!saida, grupo.data),
           metodo: "Biometrico",
-          observacoes: observacaoAutomatica(entrada),
+          observacoes: observacaoAutomatica(entrada, !!saida, grupo.data),
         });
         registosCriados++;
       } else {
@@ -211,15 +238,15 @@ var sincronizar = async function (req, res) {
         var novaSaida = existente.hora_saida;
         if (!novaEntrada || (novaEntrada && entrada < novaEntrada)) novaEntrada = entrada;
         if (!novaSaida || (novaSaida && saida && saida > novaSaida)) novaSaida = saida;
-        // Estado automatico: Ausente/Atrasado/Presente sao recalculados pelo biometro;
-        // estados manuais como Licenca/Ferias sao preservados.
+        // Estado automatico: Ausente/Atrasado/Presente/Em_Curso sao recalculados pelo
+        // biometro; estados manuais como Licenca/Ferias sao preservados.
         var novoEstado = existente.estado;
-        if (existente.estado === "Ausente" || existente.estado === "Atrasado" || existente.estado === "Presente") {
-          novoEstado = classificarEstado(novaEntrada);
+        if (existente.estado === "Ausente" || existente.estado === "Atrasado" || existente.estado === "Presente" || existente.estado === "Em_Curso") {
+          novoEstado = classificarEstado(novaEntrada, !!novaSaida, grupo.data);
         }
         var novaObs = existente.observacoes;
-        if (!novaObs || novaObs.indexOf("Registo automático") !== -1) {
-          novaObs = observacaoAutomatica(novaEntrada);
+        if (ehObservacaoAutomatica(novaObs)) {
+          novaObs = observacaoAutomatica(novaEntrada, !!novaSaida, grupo.data);
         }
         await existente.update({
           hora_entrada: novaEntrada,
@@ -248,6 +275,11 @@ var sincronizar = async function (req, res) {
     // dos ultimos 7 dias sem nenhuma picagem e sem registo de presenca
     var ausentesCriados = await marcarAusentesAutomaticos(colaboradores);
 
+    // 5) Reclassificar os registos do mes corrente (tolerancia / "Em curso").
+    // Correge tambem registos que ficaram com estado antigo porque nao houve
+    // picagens novas (ex.: registos de hoje que ainda nao tem hora de saida).
+    var reclassificados = await reclassificarAutomaticos();
+
     return res.status(200).json({
       mensagem: "Picagens sincronizadas",
       recebidas: recebidas,
@@ -257,6 +289,7 @@ var sincronizar = async function (req, res) {
       registos_criados: registosCriados,
       registos_actualizados: registosActualizados,
       ausentes_criados: ausentesCriados,
+      reclassificados: reclassificados,
     });
   } catch (e) {
     console.log("Erro ao sincronizar picagens:", e.message);
@@ -352,6 +385,40 @@ var marcarAusentesAutomaticos = async function (colaboradores) {
   }
 
   return criados;
+};
+
+// Recalcula o estado dos registos biometricos do mes corrente, para reflectir
+// a tolerancia de entrada e o estado provisorio "Em curso" do dia de hoje.
+// Correccoes do RH (ajustado_manual, metodo Manual) e estados manuals como
+// Licenca/Ferias/Fim_semana nunca sao tocados.
+var reclassificarAutomaticos = async function () {
+  var hoje = new Date();
+  var inicioMes = dataLocal(new Date(hoje.getFullYear(), hoje.getMonth(), 1));
+
+  var registos = await RegistoPresenca.findAll({
+    attributes: ["id", "data", "hora_entrada", "hora_saida", "estado", "observacoes"],
+    where: {
+      metodo: "Biometrico",
+      ajustado_manual: { [Op.or]: [false, null] },
+      data: { [Op.gte]: inicioMes },
+    },
+  });
+
+  var actualizados = 0;
+  for (var r = 0; r < registos.length; r++) {
+    var registo = registos[r];
+    var data = dataLocal(registo.data);
+    var temSaida = !!registo.hora_saida;
+    var novoEstado = classificarEstado(registo.hora_entrada, temSaida, data);
+    var novaObs = ehObservacaoAutomatica(registo.observacoes)
+      ? observacaoAutomatica(registo.hora_entrada, temSaida, data)
+      : registo.observacoes;
+    if (novoEstado === registo.estado && novaObs === registo.observacoes) continue;
+    await registo.update({ estado: novoEstado, observacoes: novaObs });
+    actualizados++;
+  }
+
+  return actualizados;
 };
 
 // Lista colaboradores com mapeamento biometrico (para a ponte e para o admin)
