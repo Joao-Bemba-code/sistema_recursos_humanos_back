@@ -78,7 +78,12 @@ var listVencimentos = async function (req, res) {
     ];
 
     if (search) {
-      include[0].where = { nome_completo: { [Op.like]: "%" + search + "%" } };
+      include[0].where = {
+        [Op.or]: [
+          { nome_completo: { [Op.like]: "%" + search + "%" } },
+          { numero_colaborador: { [Op.like]: "%" + search + "%" } },
+        ],
+      };
     }
 
     var { count, rows } = await Vencimento.findAndCountAll({
@@ -408,7 +413,12 @@ var listPagamentos = async function (req, res) {
     ];
 
     if (search) {
-      include[0].where = { nome_completo: { [Op.like]: "%" + search + "%" } };
+      include[0].where = {
+        [Op.or]: [
+          { nome_completo: { [Op.like]: "%" + search + "%" } },
+          { numero_colaborador: { [Op.like]: "%" + search + "%" } },
+        ],
+      };
     }
 
     var { count, rows } = await Pagamento.findAndCountAll({

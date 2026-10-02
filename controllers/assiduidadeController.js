@@ -15,9 +15,21 @@ var list = async function (req, res) {
 
     var where = {};
     if (search) {
-      where[Op.or] = [
-        { observacoes: { [Op.like]: "%" + search + "%" } },
-      ];
+      var colabsEncontrados = await Colaborador.findAll({
+        where: {
+          [Op.or]: [
+            { nome_completo: { [Op.like]: "%" + search + "%" } },
+            { numero_colaborador: { [Op.like]: "%" + search + "%" } },
+          ],
+        },
+        attributes: ["id"],
+      });
+      var idsColabs = colabsEncontrados.map(function (c) { return c.id; });
+      var ou = [{ observacoes: { [Op.like]: "%" + search + "%" } }];
+      if (idsColabs.length > 0) {
+        ou.push({ colaborador_id: { [Op.in]: idsColabs } });
+      }
+      where[Op.or] = ou;
     }
     if (estado) where.estado = estado;
     if (metodo) where.metodo = metodo;

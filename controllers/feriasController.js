@@ -12,10 +12,24 @@ var list = async function (req, res) {
 
     var where = {};
     if (search) {
-      where[Op.or] = [
+      var colabsEncontrados = await Colaborador.findAll({
+        where: {
+          [Op.or]: [
+            { nome_completo: { [Op.like]: "%" + search + "%" } },
+            { numero_colaborador: { [Op.like]: "%" + search + "%" } },
+          ],
+        },
+        attributes: ["id"],
+      });
+      var idsColabs = colabsEncontrados.map(function (c) { return c.id; });
+      var ou = [
         { motivo: { [Op.like]: "%" + search + "%" } },
         { observacoes_aprovacao: { [Op.like]: "%" + search + "%" } },
       ];
+      if (idsColabs.length > 0) {
+        ou.push({ colaborador_id: { [Op.in]: idsColabs } });
+      }
+      where[Op.or] = ou;
     }
     if (estado) where.estado = estado;
     if (colaborador_id) where.colaborador_id = colaborador_id;
