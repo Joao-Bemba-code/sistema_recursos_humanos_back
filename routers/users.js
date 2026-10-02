@@ -9,6 +9,8 @@ router.get("/:id", requireRole("Administrador Geral", "Director Geral", "Directo
 router.post("/", requireRole("Administrador Geral", "Director Geral", "Director de Recursos Humanos"), userController.create);
 router.put("/:id/email", requireRole("Administrador Geral", "Director Geral", "Director de Recursos Humanos"), userController.changeEmail);
 router.put("/:id/password", requireRole("Administrador Geral", "Director Geral", "Director de Recursos Humanos"), userController.changePassword);
+// Bloquear / desbloquear a conta (o desbloqueio tambem reinicia as tentativas)
+router.put("/:id/bloqueio", requireRole("Administrador Geral", "Director Geral", "Director de Recursos Humanos"), userController.bloqueio);
 router.put("/:id", requireRole("Administrador Geral", "Director Geral", "Director de Recursos Humanos"), userController.update);
 router.delete("/:id", requireRole("Administrador Geral"), userController.remove);
 

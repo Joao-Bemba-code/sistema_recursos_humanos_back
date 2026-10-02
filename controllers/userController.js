@@ -36,6 +36,12 @@ var list = async function (req, res) {
       where.activo = estado === "true" || estado === "1";
     }
 
+    // Filtro "Bloqueados": contas travadas por tentativas falhadas de login
+    var filtrarBloqueados = req.query.bloqueados;
+    if (filtrarBloqueados === "1" || filtrarBloqueados === "true") {
+      where.bloqueado = true;
+    }
+
     var rows = await Utilizador.findAll({
       where: where,
       include: [
@@ -59,6 +65,7 @@ var list = async function (req, res) {
         telefone: u.telefone,
         activo: u.activo,
         bloqueado: u.bloqueado,
+        tentativas_login: u.tentativas_login || 0,
         ultimo_login: u.ultimo_login,
         perfil_id: u.perfil_id,
         perfil: u.perfil || null,
@@ -227,6 +234,43 @@ var create = async function (req, res) {
   }
 };
 
+// Bloquear / desbloquear a conta de um utilizador.
+// Desbloquear reinicia tambem as tentativas de login, para o colaborador
+// voltar a entrar sem a contagem recomecar no proximo erro.
+var bloqueio = async function (req, res) {
+  try {
+    var { id } = req.params;
+    var pedido = req.body || {};
+    var bloquear = pedido.bloqueado === true || pedido.bloqueado === "true" || pedido.bloqueado === 1;
+
+    var utilizador = await Utilizador.findByPk(id);
+    if (!utilizador) {
+      return res.status(404).json({ error: "Utilizador não encontrado" });
+    }
+
+    var dados = { bloqueado: bloquear };
+    if (!bloquear) dados.tentativas_login = 0;
+
+    await utilizador.update(dados);
+
+    console.log("Conta " + (bloquear ? "BLOQUEADA" : "DESBLOQUEADA") + " por " + (req.utilizador ? (req.utilizador.email || req.utilizador.id) : "sistema") + ": " + utilizador.email);
+
+    return res.status(200).json({
+      mensagem: bloquear
+        ? "Conta bloqueada. O utilizador não consegue entrar."
+        : "Conta desbloqueada e tentativas de login reiniciadas.",
+      dados: {
+        id: utilizador.id,
+        bloqueado: bloquear,
+        tentativas_login: bloquear ? (utilizador.tentativas_login || 0) : 0,
+      },
+    });
+  } catch (e) {
+    console.log("Erro ao alterar bloqueio da conta:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
 var update = async function (req, res) {
   try {
     var { id } = req.params;
@@ -386,4 +430,4 @@ var changeEmail = async function (req, res) {
   }
 };
 
-module.exports = { list, getById, create, update, remove, changePassword, changeEmail };
+module.exports = { list, getById, create, update, bloqueio, remove, changePassword, changeEmail };
