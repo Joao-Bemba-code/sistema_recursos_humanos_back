@@ -181,6 +181,28 @@ var migrations = async function () {
 
     // ==================== COLABORADORES ====================
     await alterarColuna("colaboradores", "nome_completo", "VARCHAR(200) NULL");
+    await adicionarColuna("colaboradores", "id_biometrico", "VARCHAR(30) NULL");
+
+    // ==================== BIOMETRO: picagens da ponte ZKTeco ====================
+    // Sem FKs a nivel de BD para compatibilidade com TiDB
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `picagens_biometrico` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`id_biometrico` VARCHAR(30) NOT NULL, " +
+      "`colaborador_id` CHAR(36) NULL, " +
+      "`data_hora` DATETIME NOT NULL, " +
+      "`tipo` INT NULL, " +
+      "`raw` VARCHAR(500) NULL, " +
+      "`processada` BOOLEAN NOT NULL DEFAULT false, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "UNIQUE KEY `picagens_biometrico_unique` (`id_biometrico`, `data_hora`), " +
+      "KEY `picagens_colaborador_idx` (`colaborador_id`), " +
+      "KEY `picagens_processada_idx` (`processada`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'picagens_biometrico' garantida!");
 
     // ==================== CONTRATOS ====================
     await adicionarColuna("contratos", "subsidio_alimentacao", "DECIMAL(12,2) NULL");

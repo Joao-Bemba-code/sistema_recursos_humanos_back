@@ -33,6 +33,7 @@ var pdfRoutes = require("./routers/pdf");
 var ocorrenciaRoutes = require("./routers/ocorrencias");
 var comunicacaoRoutes = require("./routers/comunicacoes");
 var creditoRoutes = require("./routers/creditos");
+var biometroRoutes = require("./routers/biometro");
 
 // CORREÇÃO: Importação protegida do módulo seed para evitar o crash MODULE_NOT_FOUND
 var seed = null;
@@ -68,7 +69,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "x-bridge-token"],
   exposedHeaders: ["Content-Disposition"],
   maxAge: 86400,
 }));
@@ -124,6 +125,7 @@ app.use("/api/pdf", authenticate, pdfRoutes);
 app.use("/api/ocorrencias", authenticate, ocorrenciaRoutes);
 app.use("/api/comunicados", authenticate, comunicacaoRoutes);
 app.use("/api/creditos", authenticate, creditoRoutes);
+app.use("/api/biometro", biometroRoutes);
 
 // Health check
 app.get("/health", function (req, res) {

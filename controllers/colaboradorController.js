@@ -99,11 +99,21 @@ var create = async function (req, res) {
     var dados = req.body;
     dados.organizacao_id = req.organizacao_id;
 
-    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes"];
+    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico"];
     var chaves = Object.keys(dados);
     for (var i = 0; i < chaves.length; i++) {
       if (dados[chaves[i]] === "" && camposOpcionais.indexOf(chaves[i]) !== -1) {
         dados[chaves[i]] = null;
+      }
+    }
+
+    // ID biometrico nao pode estar repetido entre colaboradores
+    if (dados.id_biometrico) {
+      var existenteBio = await Colaborador.findOne({
+        where: { id_biometrico: dados.id_biometrico, organizacao_id: req.organizacao_id },
+      });
+      if (existenteBio) {
+        return res.status(409).json({ error: "Esse ID biométrico já está atribuído a " + (existenteBio.nome_completo || "outro colaborador") });
       }
     }
 
@@ -136,7 +146,7 @@ var update = async function (req, res) {
     var camposProtegidos = ["id", "organizacao_id", "numero_colaborador", "createdAt", "updatedAt"];
     var camposEnum = ["genero", "estado_civil", "tipo_colaborador", "estado"];
     var camposData = ["data_nascimento", "bi_validade", "data_admissao", "data_desligamento"];
-    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes"];
+    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico"];
     var dadosActualizar = {};
 
     var keys = Object.keys(req.body);
@@ -147,6 +157,16 @@ var update = async function (req, res) {
       if (valor === "" && camposOpcionais.indexOf(keys[i]) !== -1) { dadosActualizar[keys[i]] = null; continue; }
       if (valor === undefined) continue;
       dadosActualizar[keys[i]] = valor;
+    }
+
+    // ID biometrico nao pode estar repetido entre colaboradores
+    if (dadosActualizar.id_biometrico) {
+      var existenteBio = await Colaborador.findOne({
+        where: { id_biometrico: dadosActualizar.id_biometrico, organizacao_id: req.organizacao_id, id: { [Op.ne]: colaborador.id } },
+      });
+      if (existenteBio) {
+        return res.status(409).json({ error: "Esse ID biométrico já está atribuído a " + (existenteBio.nome_completo || "outro colaborador") });
+      }
     }
 
     await colaborador.update(dadosActualizar);

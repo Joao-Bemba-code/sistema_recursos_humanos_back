@@ -12,6 +12,10 @@ var Colaborador = sequelize.define("Colaborador", {
     allowNull: false,
     unique: true,
   },
+  id_biometrico: {
+    type: DataTypes.STRING(30),
+    allowNull: true,
+  },
   nome_completo: {
     type: DataTypes.STRING(200),
     allowNull: true,

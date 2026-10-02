@@ -16,6 +16,7 @@ var { CursoFormacao, InscricaoFormacao } = require("./Formacao");
 var OcorrenciaDisciplinar = require("./Disciplinar");
 var { Vencimento, Pagamento } = require("./FolhaSalarial");
 var { Credito, CreditoMovimento } = require("./Credito");
+var { PicagemBiometrico } = require("./Biometro");
 var { Aviso } = require("./Comunicacao");
 var Notificacao = require("./Notificacao");
 var PedidoColaborador = require("./PedidoColaborador");
@@ -150,6 +151,10 @@ CreditoMovimento.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "col
 // Pagamento -> Movimentos de Credito
 Pagamento.hasMany(CreditoMovimento, { foreignKey: "pagamento_id", as: "movimentos_credito", constraints: false });
 CreditoMovimento.belongsTo(Pagamento, { foreignKey: "pagamento_id", as: "pagamento", constraints: false });
+
+// PicagemBiometrico -> Colaborador (sem FK a nivel de BD, compatibilidade TiDB)
+PicagemBiometrico.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador", constraints: false });
+Colaborador.hasMany(PicagemBiometrico, { foreignKey: "colaborador_id", as: "picagens_biometrico", constraints: false });
 
 // Utilizador -> Notificacoes
 Utilizador.hasMany(Notificacao, { foreignKey: "utilizador_id", as: "notificacoes" });
@@ -308,8 +313,35 @@ var syncDatabase = async () => {
         await sequelize.query("ALTER TABLE `colaboradores` MODIFY COLUMN `nome_completo` VARCHAR(200) NULL");
         console.log(" Coluna 'nome_completo' alterada para NULL!");
       }
+      if (nomes6.indexOf("id_biometrico") === -1) {
+        await sequelize.query("ALTER TABLE `colaboradores` ADD COLUMN `id_biometrico` VARCHAR(30) NULL");
+        console.log(" Coluna 'id_biometrico' adicionada!");
+      }
     } catch (alterErr6) {
       console.log(" Aviso: problema ao tornar nome_completo nullable:", alterErr6.message);
+    }
+
+    // Tabela de picagens do biometro (fallback caso as migracoes falhem)
+    try {
+      await sequelize.query(
+        "CREATE TABLE IF NOT EXISTS `picagens_biometrico` (" +
+        "`id` CHAR(36) NOT NULL, " +
+        "`id_biometrico` VARCHAR(30) NOT NULL, " +
+        "`colaborador_id` CHAR(36) NULL, " +
+        "`data_hora` DATETIME NOT NULL, " +
+        "`tipo` INT NULL, " +
+        "`raw` VARCHAR(500) NULL, " +
+        "`processada` BOOLEAN NOT NULL DEFAULT false, " +
+        "`createdAt` DATETIME NOT NULL, " +
+        "`updatedAt` DATETIME NOT NULL, " +
+        "PRIMARY KEY (`id`), " +
+        "UNIQUE KEY `picagens_biometrico_unique` (`id_biometrico`, `data_hora`), " +
+        "KEY `picagens_colaborador_idx` (`colaborador_id`), " +
+        "KEY `picagens_processada_idx` (`processada`)" +
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+      );
+    } catch (picErr) {
+      console.log(" Aviso: problema ao garantir tabela picagens_biometrico:", picErr.message);
     }
     try {
       var resultado7 = await sequelize.query("SHOW COLUMNS FROM `contratos`");
@@ -429,6 +461,7 @@ module.exports = {
   Pagamento,
   Credito,
   CreditoMovimento,
+  PicagemBiometrico,
   Aviso,
   Notificacao,
   PedidoColaborador,
