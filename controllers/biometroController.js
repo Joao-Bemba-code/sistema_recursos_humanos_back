@@ -11,6 +11,11 @@ var HORARIO_ENTRADA = (process.env.HORARIO_ENTRADA || "08:00").slice(0, 5);
 var HORARIO_SAIDA = (process.env.HORARIO_SAIDA || "16:00").slice(0, 5);
 var TOLERANCIA_MINUTOS = parseInt(process.env.TOLERANCIA_ENTRADA || "40", 10);
 if (isNaN(TOLERANCIA_MINUTOS) || TOLERANCIA_MINUTOS < 0) TOLERANCIA_MINUTOS = 40;
+// Separacao minima (minutos) entre a entrada e a seguinte picagem para essa
+// picagem contar como SAIDA. Sem isto, duas picagens seguidas de manha
+// (ex.: 07:55 e 08:03) eram lidas como entrada + saida.
+var MINUTOS_SAIDA = parseInt(process.env.MINUTOS_SAIDA || "60", 10);
+if (isNaN(MINUTOS_SAIDA) || MINUTOS_SAIDA < 1) MINUTOS_SAIDA = 60;
 
 // Converte "HH:MM" (ou "HH:MM:SS") em minutos desde a meia-noite — ignora os
 // segundos, para a tolerancia ser contada por minuto inteiro (08:40:15 = 08:40).
@@ -70,6 +75,42 @@ var observacaoAutomatica = function (horaEntrada, temSaida, data) {
 var ehObservacaoAutomatica = function (texto) {
   if (!texto) return true;
   return String(texto).indexOf("automático do biómetro") !== -1;
+};
+
+// Descobre a entrada e a saida de um dia a partir das picagens.
+// As picagens chegam por lotes (por vezes so uma), por isso nao se pode assumir
+// que a ultima do lote e' a saida: so passa a saida se estiver pelo menos
+// MINUTOS_SAIDA depois da entrada (ou se o aparelho marcar o tipo como saida).
+var atribuirHorarios = function (entradaActual, saidaActual, picagensOrdenadas) {
+  var entrada = entradaActual || null;
+  var saida = saidaActual || null;
+
+  for (var i = 0; i < picagensOrdenadas.length; i++) {
+    var p = picagensOrdenadas[i];
+    var minutos = paraMinutos(p.hora);
+    if (minutos === null) continue;
+
+    if (!entrada) {
+      entrada = p.hora;
+      continue;
+    }
+    var minutosEntrada = paraMinutos(entrada);
+    if (minutosEntrada === null) continue;
+
+    if (minutos < minutosEntrada) {
+      entrada = p.hora; // chegou mais cedo do que se pensava
+      continue;
+    }
+
+    var minutosSaida = saida ? paraMinutos(saida) : null;
+    if (minutosSaida !== null && minutos <= minutosSaida) continue; // ja temos saida mais tarde
+
+    if (minutos - minutosEntrada >= MINUTOS_SAIDA || p.tipo === 1) {
+      saida = p.hora;
+    }
+  }
+
+  return { entrada: entrada, saida: saida };
 };
 
 
@@ -197,8 +238,9 @@ var sincronizar = async function (req, res) {
       }
       np.colaborador_id = colab.id;
       var chave = colab.id + "|" + dataLocal(np.data_hora);
-      if (!grupos[chave]) grupos[chave] = { colab: colab, data: dataLocal(np.data_hora), datas: [], ids: [] };
+      if (!grupos[chave]) grupos[chave] = { colab: colab, data: dataLocal(np.data_hora), datas: [], tipos: [], ids: [] };
       grupos[chave].datas.push(new Date(np.data_hora));
+      grupos[chave].tipos.push(np.tipo === null || np.tipo === undefined ? null : parseInt(np.tipo, 10));
       grupos[chave].ids.push(np.id);
     }
 
@@ -206,12 +248,23 @@ var sincronizar = async function (req, res) {
     for (var g = 0; g < chavesGrupo.length; g++) {
       var grupo = grupos[chavesGrupo[g]];
       grupo.datas.sort(function (a, b) { return a - b; });
-      var entrada = horaLocal(grupo.datas[0]);
-      var saida = grupo.datas.length > 1 ? horaLocal(grupo.datas[grupo.datas.length - 1]) : null;
+
+      var picagensOrdenadas = grupo.datas.map(function (d, indice) {
+        return { hora: horaLocal(d), tipo: grupo.tipos[indice] };
+      });
 
       var existente = await RegistoPresenca.findOne({
         where: { colaborador_id: grupo.colab.id, data: grupo.data },
       });
+
+      // Entrada e saida do dia, juntando as picagens novas com o que ja existe
+      var horarios = atribuirHorarios(
+        existente ? existente.hora_entrada : null,
+        existente ? existente.hora_saida : null,
+        picagensOrdenadas
+      );
+      var entrada = horarios.entrada;
+      var saida = horarios.saida;
 
       if (!existente) {
         await RegistoPresenca.create({
@@ -234,24 +287,20 @@ var sincronizar = async function (req, res) {
           await PicagemBiometrico.update({ processada: true }, { where: { id: { [Op.in]: grupo.ids } } });
           continue;
         }
-        var novaEntrada = existente.hora_entrada;
-        var novaSaida = existente.hora_saida;
-        if (!novaEntrada || (novaEntrada && entrada < novaEntrada)) novaEntrada = entrada;
-        if (!novaSaida || (novaSaida && saida && saida > novaSaida)) novaSaida = saida;
         // Estado automatico: Ausente/Atrasado/Presente/Em_Curso sao recalculados pelo
         // biometro; estados manuais como Licenca/Ferias sao preservados.
         var novoEstado = existente.estado;
         if (existente.estado === "Ausente" || existente.estado === "Atrasado" || existente.estado === "Presente" || existente.estado === "Em_Curso") {
-          novoEstado = classificarEstado(novaEntrada, !!novaSaida, grupo.data);
+          novoEstado = classificarEstado(entrada, !!saida, grupo.data);
         }
         var novaObs = existente.observacoes;
         if (ehObservacaoAutomatica(novaObs)) {
-          novaObs = observacaoAutomatica(novaEntrada, !!novaSaida, grupo.data);
+          novaObs = observacaoAutomatica(entrada, !!saida, grupo.data);
         }
         await existente.update({
-          hora_entrada: novaEntrada,
-          hora_saida: novaSaida,
-          horas_trabalhadas: calcularHorasTrabalhadas(novaEntrada, novaSaida),
+          hora_entrada: entrada,
+          hora_saida: saida,
+          horas_trabalhadas: calcularHorasTrabalhadas(entrada, saida),
           metodo: existente.metodo === "Biometrico" ? "Biometrico" : existente.metodo,
           estado: novoEstado,
           observacoes: novaObs,
@@ -394,9 +443,11 @@ var marcarAusentesAutomaticos = async function (colaboradores) {
 var reclassificarAutomaticos = async function () {
   var hoje = new Date();
   var inicioMes = dataLocal(new Date(hoje.getFullYear(), hoje.getMonth(), 1));
+  var inicioMesSql = inicioMes + "T00:00:00";
+  var agora = new Date();
 
   var registos = await RegistoPresenca.findAll({
-    attributes: ["id", "data", "hora_entrada", "hora_saida", "estado", "observacoes"],
+    attributes: ["id", "colaborador_id", "data", "hora_entrada", "hora_saida", "estado", "observacoes"],
     where: {
       metodo: "Biometrico",
       ajustado_manual: { [Op.or]: [false, null] },
@@ -404,17 +455,72 @@ var reclassificarAutomaticos = async function () {
     },
   });
 
+  // 1) Recalcular entrada/saida a partir de TODAS as picagens ja gravadas.
+  // Isto recupera as horas de saida que ficaram em falta (a picagem de saida
+  // chegou sozinha num lote e, antes, era descartada).
+  var idsColabs = {};
+  registos.forEach(function (r) { idsColabs[r.colaborador_id] = true; });
+  var listaIds = Object.keys(idsColabs);
+  var picagensPorDia = {};
+  if (listaIds.length > 0) {
+    var picagens = await PicagemBiometrico.findAll({
+      attributes: ["colaborador_id", "data_hora", "tipo"],
+      where: {
+        colaborador_id: { [Op.in]: listaIds },
+        data_hora: { [Op.gte]: new Date(inicioMesSql), [Op.lte]: agora },
+      },
+      order: [["data_hora", "ASC"]],
+    });
+    picagens.forEach(function (p) {
+      var chave = p.colaborador_id + "|" + dataLocal(p.data_hora);
+      if (!picagensPorDia[chave]) picagensPorDia[chave] = [];
+      picagensPorDia[chave].push({
+        hora: horaLocal(p.data_hora),
+        tipo: p.tipo === null || p.tipo === undefined ? null : parseInt(p.tipo, 10),
+      });
+    });
+  }
+
+  // 2) Aplicar entrada/saida + estado + observacao
   var actualizados = 0;
   for (var r = 0; r < registos.length; r++) {
     var registo = registos[r];
     var data = dataLocal(registo.data);
-    var temSaida = !!registo.hora_saida;
-    var novoEstado = classificarEstado(registo.hora_entrada, temSaida, data);
+
+    var horarios = atribuirHorarios(
+      registo.hora_entrada,
+      registo.hora_saida,
+      picagensPorDia[registo.colaborador_id + "|" + data] || []
+    );
+    var entrada = horarios.entrada;
+    var saida = horarios.saida;
+    var temSaida = !!saida;
+
+    var novoEstado = registo.estado;
+    if (registo.estado === "Ausente" || registo.estado === "Atrasado" || registo.estado === "Presente" || registo.estado === "Em_Curso") {
+      novoEstado = classificarEstado(entrada, temSaida, data);
+    }
     var novaObs = ehObservacaoAutomatica(registo.observacoes)
-      ? observacaoAutomatica(registo.hora_entrada, temSaida, data)
+      ? observacaoAutomatica(entrada, temSaida, data)
       : registo.observacoes;
-    if (novoEstado === registo.estado && novaObs === registo.observacoes) continue;
-    await registo.update({ estado: novoEstado, observacoes: novaObs });
+    var novasHoras = temSaida ? calcularHorasTrabalhadas(entrada, saida) : registo.horas_trabalhadas;
+
+    if (
+      novoEstado === registo.estado &&
+      novaObs === registo.observacoes &&
+      String(entrada || "") === String(registo.hora_entrada || "") &&
+      String(saida || "") === String(registo.hora_saida || "") &&
+      String(novasHoras === null || novasHoras === undefined ? "" : novasHoras) === String(registo.horas_trabalhadas === null || registo.horas_trabalhadas === undefined ? "" : registo.horas_trabalhadas)
+    ) {
+      continue;
+    }
+    await registo.update({
+      hora_entrada: entrada,
+      hora_saida: saida,
+      horas_trabalhadas: novasHoras,
+      estado: novoEstado,
+      observacoes: novaObs,
+    });
     actualizados++;
   }
 
