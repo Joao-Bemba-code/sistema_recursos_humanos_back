@@ -59,11 +59,21 @@ var horaLocal = function (d) {
 };
 
 // Formata uma Date para "YYYY-MM-DD" (data local do servidor)
+// Aceita tambem o texto "YYYY-MM-DD" devolvido pelas colunas DATEONLY
 var dataLocal = function (d) {
+  if (!(d instanceof Date)) {
+    d = new Date(String(d).slice(0, 10) + "T00:00:00");
+  }
+  if (isNaN(d.getTime())) return null;
   var y = d.getFullYear();
   var m = String(d.getMonth() + 1).padStart(2, "0");
   var dia = String(d.getDate()).padStart(2, "0");
   return y + "-" + m + "-" + dia;
+};
+
+// Chave "id|data" para comparar dias (aceita Date ou "YYYY-MM-DD" do DATEONLY)
+var chaveDia = function (id, data) {
+  return id + "|" + (dataLocal(data) || String(data));
 };
 
 var calcularHorasTrabalhadas = function (horaEntrada, horaSaida) {
@@ -137,7 +147,7 @@ var sincronizar = async function (req, res) {
     // 2) Mapear id_biometrico -> colaborador
     var colaboradores = await Colaborador.findAll({
       where: { id_biometrico: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] } },
-      attributes: ["id", "nome_completo", "numero_colaborador", "id_biometrico", "estado", "data_admissao"],
+      attributes: ["id", "nome_completo", "numero_colaborador", "id_biometrico", "estado", "data_admissao", "data_desligamento"],
     });
     var mapa = {};
     for (var j = 0; j < colaboradores.length; j++) {
@@ -190,8 +200,10 @@ var sincronizar = async function (req, res) {
         });
         registosCriados++;
       } else {
-        // Registo manual nao e alterado pelo biometro
-        if (existente.metodo === "Manual") {
+        // Registo corrigido a mao pelo RH (metodo Manual ou ajustado_manual): o
+        // biometro nao lhe toca mais, para nao voltar a trocar o que o RH corrigiu
+        // (ex.: esqueceu-se de meter o dedo e o RH passou a entrada a mao).
+        if (existente.metodo === "Manual" || existente.ajustado_manual) {
           await PicagemBiometrico.update({ processada: true }, { where: { id: { [Op.in]: grupo.ids } } });
           continue;
         }
@@ -252,51 +264,89 @@ var sincronizar = async function (req, res) {
   }
 };
 
-// Cria o registo "Ausente" (metodo Biometrico) para o dia de HOJE quando um
-// colaborador mapeado e activo ainda nao tem picagem nem registo de presenca.
-// So o proprio dia (sem olhar para tras) — decisao do utilizador: o biometro
-// comeca a contar "de hoje em diante", para nao inventar faltas do passado.
+// Cria o registo "Ausente" (metodo Biometrico) para os DIAS UTEIS (seg-sex) desde
+// o dia 1 do mes actual ate hoje, quando um colaborador mapeado e activo nao tem
+// picagem nem registo de presenca nesse dia.
+// A assiduidade so conta a partir do dia 1 do mes: dias anteriores ficam de fora
+// (o biometro comeca a contar "de hoje para tras dentro do mes").
+// Registo ja corrigido a mao pelo RH conta como existente e nunca e mexido.
 var marcarAusentesAutomaticos = async function (colaboradores) {
-  var criados = 0;
+  if (!colaboradores || colaboradores.length === 0) return 0;
+
   var hoje = new Date();
-  var diaSemana = hoje.getDay(); // 0=domingo, 6=sabado
-  if (diaSemana === 0 || diaSemana === 6) return 0;
+  var diasUteis = [];
+  var dia = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  while (dia <= hoje) {
+    var diaSemana = dia.getDay(); // 0=domingo, 6=sabado
+    if (diaSemana !== 0 && diaSemana !== 6) diasUteis.push(dataLocal(dia));
+    dia.setDate(dia.getDate() + 1);
+  }
+  if (diasUteis.length === 0) return 0;
 
-  var dataStr = dataLocal(hoje);
+  var inicioMes = diasUteis[0];
+  var fimMes = diasUteis[diasUteis.length - 1];
 
+  // 1) Uma consulta: picagens do mes (para saber quem passou o dedo)
+  var picagensMes = await PicagemBiometrico.findAll({
+    attributes: ["id_biometrico", "data_hora"],
+    where: {
+      id_biometrico: { [Op.in]: colaboradores.map(function (c) { return c.id_biometrico; }) },
+      data_hora: { [Op.gte]: new Date(inicioMes + "T00:00:00"), [Op.lte]: new Date(fimMes + "T23:59:59") },
+    },
+  });
+  var comPicagem = {};
+  for (var p = 0; p < picagensMes.length; p++) {
+    comPicagem[chaveDia(picagensMes[p].id_biometrico, picagensMes[p].data_hora)] = true;
+  }
+
+  // 2) Uma consulta: registos de presenca ja existentes no mes
+  var registosMes = await RegistoPresenca.findAll({
+    attributes: ["colaborador_id", "data"],
+    where: {
+      colaborador_id: { [Op.in]: colaboradores.map(function (c) { return c.id; }) },
+      data: { [Op.between]: [inicioMes, fimMes] },
+    },
+  });
+  var comRegisto = {};
+  for (var r = 0; r < registosMes.length; r++) {
+    comRegisto[chaveDia(registosMes[r].colaborador_id, registosMes[r].data)] = true;
+  }
+
+  // 3) Criar os "Ausente" em falta
+  var criados = 0;
   for (var i = 0; i < colaboradores.length; i++) {
     var colab = colaboradores[i];
     if (colab.estado !== "Activo") continue;
 
-    // Nao marcar antes da admissao
-    if (colab.data_admissao && dataStr < colab.data_admissao) continue;
+    var admissao = colab.data_admissao ? dataLocal(colab.data_admissao) : null;
+    var desligamento = colab.data_desligamento ? dataLocal(colab.data_desligamento) : null;
 
-    var temPicagem = await PicagemBiometrico.findOne({
-      where: { id_biometrico: colab.id_biometrico, data_hora: { [Op.gte]: new Date(dataStr + "T00:00:00"), [Op.lt]: new Date(dataStr + "T23:59:59.999") } },
-    });
-    if (temPicagem) continue;
+    for (var j = 0; j < diasUteis.length; j++) {
+      var dataStr = diasUteis[j];
+      // Nao marcar antes da admissao nem depois do desligamento
+      if (admissao && dataStr < admissao) continue;
+      if (desligamento && dataStr > desligamento) continue;
+      if (comRegisto[chaveDia(colab.id, dataStr)]) continue;
+      if (comPicagem[chaveDia(colab.id_biometrico, dataStr)]) continue;
 
-    var temRegisto = await RegistoPresenca.findOne({
-      where: { colaborador_id: colab.id, data: dataStr },
-    });
-    if (temRegisto) continue;
-
-    try {
-      await RegistoPresenca.create({
-        colaborador_id: colab.id,
-        data: dataStr,
-        hora_entrada: null,
-        hora_saida: null,
-        horas_trabalhadas: null,
-        horas_extras: 0,
-        estado: "Ausente",
-        metodo: "Biometrico",
-        observacoes: "Falta automática: sem picagem no biómetro",
-      });
-      criados++;
-    } catch (e) {
-      if (e.name !== "SequelizeUniqueConstraintError") {
-        console.log("Erro ao marcar ausente automatico:", e.message);
+      try {
+        await RegistoPresenca.create({
+          colaborador_id: colab.id,
+          data: dataStr,
+          hora_entrada: null,
+          hora_saida: null,
+          horas_trabalhadas: null,
+          horas_extras: 0,
+          estado: "Ausente",
+          metodo: "Biometrico",
+          observacoes: "Falta automática: sem picagem no biómetro",
+        });
+        comRegisto[chaveDia(colab.id, dataStr)] = true;
+        criados++;
+      } catch (e) {
+        if (e.name !== "SequelizeUniqueConstraintError") {
+          console.log("Erro ao marcar ausente automatico:", e.message);
+        }
       }
     }
   }

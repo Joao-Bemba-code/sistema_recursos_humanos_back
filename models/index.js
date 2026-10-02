@@ -226,6 +226,10 @@ var syncDatabase = async () => {
         await sequelize.query("ALTER TABLE `registos_presenca` ADD COLUMN `processada_ano` INT NULL");
         console.log(" Coluna 'processada_ano' adicionada!");
       }
+      if (nomesColunas.indexOf("ajustado_manual") === -1) {
+        await sequelize.query("ALTER TABLE `registos_presenca` ADD COLUMN `ajustado_manual` BOOLEAN NOT NULL DEFAULT false");
+        console.log(" Coluna 'ajustado_manual' adicionada!");
+      }
     } catch (alterErr) {
       console.log(" Aviso: problema ao adicionar colunas de justificacao:", alterErr.message);
     }

@@ -141,6 +141,8 @@ var migrations = async function () {
     await adicionarColuna("registos_presenca", "processada", "BOOLEAN NOT NULL DEFAULT false");
     await adicionarColuna("registos_presenca", "processada_mes", "INT NULL");
     await adicionarColuna("registos_presenca", "processada_ano", "INT NULL");
+    // Registo corrigido a mao pelo RH: o biometro deixa de mexer nele
+    await adicionarColuna("registos_presenca", "ajustado_manual", "BOOLEAN NOT NULL DEFAULT false");
 
     // Backfill idempotente: faltas/atrasos de meses que ja tem pagamento
     // ficam marcados como processados (comportamento antigo de "mes processado")

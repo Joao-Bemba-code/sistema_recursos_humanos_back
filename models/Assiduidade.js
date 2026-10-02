@@ -51,6 +51,12 @@ var RegistoPresenca = sequelize.define("RegistoPresenca", {
     type: DataTypes.TEXT,
     allowNull: true,
   },
+  // Colocado a true quando o RH edita o registo manualmente (ex.: esqueceu-se de
+  // colocar o dedo no biometro). A ponte do biometro nunca volta a mexer nele.
+  ajustado_manual: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
   processada: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
