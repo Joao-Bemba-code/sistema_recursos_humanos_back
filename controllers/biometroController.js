@@ -16,6 +16,9 @@ if (isNaN(TOLERANCIA_MINUTOS) || TOLERANCIA_MINUTOS < 0) TOLERANCIA_MINUTOS = 40
 // (ex.: 07:55 e 08:03) eram lidas como entrada + saida.
 var MINUTOS_SAIDA = parseInt(process.env.MINUTOS_SAIDA || "60", 10);
 if (isNaN(MINUTOS_SAIDA) || MINUTOS_SAIDA < 1) MINUTOS_SAIDA = 60;
+// Marcador de versao devolvido nas respostas da API. Permite confirmar (num
+// deploy em producao) que a correccao das horas de saida ja esta activa.
+var VERSAO_ALGORITMO = "saida-2";
 
 // Converte "HH:MM" (ou "HH:MM:SS") em minutos desde a meia-noite — ignora os
 // segundos, para a tolerancia ser contada por minuto inteiro (08:40:15 = 08:40).
@@ -80,7 +83,9 @@ var ehObservacaoAutomatica = function (texto) {
 // Descobre a entrada e a saida de um dia a partir das picagens.
 // As picagens chegam por lotes (por vezes so uma), por isso nao se pode assumir
 // que a ultima do lote e' a saida: so passa a saida se estiver pelo menos
-// MINUTOS_SAIDA depois da entrada (ou se o aparelho marcar o tipo como saida).
+// MINUTOS_SAIDA depois da entrada.
+// NOTA: o tipo do aparelho (0=entrada, 1=saida) NAO e' usado — nos ZKTeco
+// testados devolve sempre 1, mesmo nas picagens de entrada da manha.
 var atribuirHorarios = function (entradaActual, saidaActual, picagensOrdenadas) {
   var entrada = entradaActual || null;
   var saida = saidaActual || null;
@@ -105,7 +110,7 @@ var atribuirHorarios = function (entradaActual, saidaActual, picagensOrdenadas) 
     var minutosSaida = saida ? paraMinutos(saida) : null;
     if (minutosSaida !== null && minutos <= minutosSaida) continue; // ja temos saida mais tarde
 
-    if (minutos - minutosEntrada >= MINUTOS_SAIDA || p.tipo === 1) {
+    if (minutos - minutosEntrada >= MINUTOS_SAIDA) {
       saida = p.hora;
     }
   }
@@ -209,6 +214,7 @@ var sincronizar = async function (req, res) {
         registos_actualizados: 0,
         ausentes_criados: 0,
         reclassificados: reclassificados,
+        versao_algoritmo: VERSAO_ALGORITMO,
       });
     }
 
@@ -339,6 +345,7 @@ var sincronizar = async function (req, res) {
       registos_actualizados: registosActualizados,
       ausentes_criados: ausentesCriados,
       reclassificados: reclassificados,
+      versao_algoritmo: VERSAO_ALGORITMO,
     });
   } catch (e) {
     console.log("Erro ao sincronizar picagens:", e.message);
@@ -444,10 +451,9 @@ var reclassificarAutomaticos = async function () {
   var hoje = new Date();
   var inicioMes = dataLocal(new Date(hoje.getFullYear(), hoje.getMonth(), 1));
   var inicioMesSql = inicioMes + "T00:00:00";
-  var agora = new Date();
 
   var registos = await RegistoPresenca.findAll({
-    attributes: ["id", "colaborador_id", "data", "hora_entrada", "hora_saida", "estado", "observacoes"],
+    attributes: ["id", "colaborador_id", "data", "hora_entrada", "hora_saida", "horas_trabalhadas", "estado", "observacoes"],
     where: {
       metodo: "Biometrico",
       ajustado_manual: { [Op.or]: [false, null] },
@@ -463,11 +469,18 @@ var reclassificarAutomaticos = async function () {
   var listaIds = Object.keys(idsColabs);
   var picagensPorDia = {};
   if (listaIds.length > 0) {
+    // O aparelho pode estar num fuso horario diferente do servidor (Luanda = UTC+1).
+    // As picagens sao gravadas com a hora "de parede" do aparelho, portanto uma
+    // picagem das 16:18 em Luanda fica como 16:18 UTC no servidor, ate ~1h no
+    // futuro. Por isso o limite superior NAO pode ser "agora" (isso descartava
+    // as picagens da tarde, e era por isso que as horas de saida nunca eram
+    // reconstruidas). Usa-se o fim do dia corrente.
+    var fimDoDia = new Date(dataLocal(hoje) + "T23:59:59.999");
     var picagens = await PicagemBiometrico.findAll({
       attributes: ["colaborador_id", "data_hora", "tipo"],
       where: {
         colaborador_id: { [Op.in]: listaIds },
-        data_hora: { [Op.gte]: new Date(inicioMesSql), [Op.lte]: agora },
+        data_hora: { [Op.gte]: new Date(inicioMesSql), [Op.lte]: fimDoDia },
       },
       order: [["data_hora", "ASC"]],
     });
