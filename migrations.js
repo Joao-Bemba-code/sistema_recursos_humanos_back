@@ -362,6 +362,35 @@ var migrations = async function () {
       console.log(" Aviso: problema ao repor o perfil 'Colaborador':", e.message);
     }
 
+    // ==================== PERFIS: remover a chave antiga "_all" ====================
+    // A chave "_all" concedia operacoes a TODOS os modulos a quem a tivesse na
+    // BD, mesmo sem nada marcado na matriz. O sistema passou a depender apenas
+    // das permissoes explicitas, por isso a chave e removida da BD (uma vez que
+    // existir) para o painel de permissoes mostrar exactamente o que esta
+    // concedido.
+    try {
+      var [perfisAll] = await sequelize.query(
+        "SELECT `id`, `nome`, `permissoes` FROM `perfis`"
+      );
+      for (var piAll = 0; piAll < perfisAll.length; piAll++) {
+        var perfilAll = perfisAll[piAll];
+        var permAll = perfilAll.permissoes;
+        if (typeof permAll === "string") {
+          try { permAll = JSON.parse(permAll); } catch (eParseAll) { permAll = null; }
+        }
+        if (!permAll || typeof permAll !== "object" || Array.isArray(permAll)) continue;
+        if (permAll._all === undefined) continue;
+        delete permAll._all;
+        await sequelize.query(
+          "UPDATE `perfis` SET `permissoes` = ? WHERE `id` = ?",
+          { replacements: [JSON.stringify(permAll), perfilAll.id] }
+        );
+        console.log(" Perfil '" + perfilAll.nome + "': chave antiga '_all' removida das permissoes!");
+      }
+    } catch (eAll) {
+      console.log(" Aviso: problema ao limpar a chave '_all' dos perfis:", eAll.message);
+    }
+
     // ==================== MODULO TAREFAS: permissoes por perfil ====================
     // Todos os perfis precisam de VER as tarefas e ACTUALIZAR o progresso das
     // suas (o controller restringe ao proprio colaborador quando nao e gestor).

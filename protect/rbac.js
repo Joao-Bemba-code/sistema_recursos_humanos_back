@@ -37,9 +37,10 @@ var normalizarPermissoes = function (perm) {
 };
 
 // Normaliza as permissoes de um perfil para o formato actual do sistema:
-// - descarta chaves antigas/desconhecidas (licencas, comunicacao, ...);
-// - expande a chave antiga "_all" (concedia operacoes a todos os modulos);
+// - descarta chaves antigas/desconhecidas (licencas, comunicacao, _all, ...);
 // - qualquer operacao concedida implica "read" (sem ler nada funciona).
+// A chave antiga "_all" NAO e expandida: quem nao tem o modulo marcado
+// explicitamente na matriz nao tem acesso (fail-closed).
 var normalizarPermissoesSistema = function (perm) {
   var p = normalizarPermissoes(perm);
   var conhecidas = {};
@@ -50,17 +51,6 @@ var normalizarPermissoesSistema = function (perm) {
     if (!conhecidas[k]) return;
     out[k] = Array.isArray(p[k]) ? p[k].slice() : [];
   });
-
-  var todos = Array.isArray(p._all) ? p._all : [];
-  if (todos.length > 0) {
-    MODULOS_SISTEMA.forEach(function (m) {
-      var existentes = out[m.chave] || [];
-      todos.forEach(function (op) {
-        if (existentes.indexOf(op) === -1) existentes.push(op);
-      });
-      out[m.chave] = existentes;
-    });
-  }
 
   Object.keys(out).forEach(function (mod) {
     var ops = out[mod];

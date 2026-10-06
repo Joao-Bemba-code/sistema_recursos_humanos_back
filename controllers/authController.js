@@ -34,9 +34,9 @@ var serializarUtilizador = function (utilizador) {
   });
 
   var perfisJson = perfisTodos.map(function (p) {
-    // Normalizacao do sistema: expande "_all", acrescenta "read" quando ha
-    // operacoes e descarta chaves antigas. O frontend usa estes perfis para
-    // decidir o que mostrar no menu.
+    // Normalizacao do sistema: mantem apenas os modulos marcados na matriz
+    // (descarta "_all" e chaves antigas) e acrescenta "read" quando ha
+    // operacoes. O frontend usa estes perfis para decidir o que mostrar.
     var permissoes = normalizarPermissoesSistema(p.permissoes);
     return {
       id: p.id,
