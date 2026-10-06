@@ -1,18 +1,19 @@
 var express = require("express");
 var router = express.Router();
-var path = require("path");
-var fs = require("fs");
 var organizacaoController = require("../controllers/organizacaoController");
-var { requireRole } = require("../protect/rbac");
+var { requireModuloOuRole } = require("../protect/rbac");
 var { Organizacao } = require("../models");
+var { guardarFicheiro, urlDoFicheiro, apagarFicheiroDeUrl } = require("../helpers/ficheiros");
 
-router.get("/", requireRole("Administrador Geral", "Director Geral"), organizacaoController.list);
-router.get("/:id", requireRole("Administrador Geral", "Director Geral"), organizacaoController.getById);
-router.post("/", requireRole("Administrador Geral"), organizacaoController.create);
-router.put("/:id", requireRole("Administrador Geral", "Director Geral"), organizacaoController.update);
-router.delete("/:id", requireRole("Administrador Geral"), organizacaoController.remove);
+// Configuracoes (organizacao): matriz de permissoes no modulo "configuracoes"
+// + perfis classicos como alternativa.
+router.get("/", requireModuloOuRole("configuracoes", "read", "Administrador Geral", "Director Geral"), organizacaoController.list);
+router.get("/:id", requireModuloOuRole("configuracoes", "read", "Administrador Geral", "Director Geral"), organizacaoController.getById);
+router.post("/", requireModuloOuRole("configuracoes", "create", "Administrador Geral"), organizacaoController.create);
+router.put("/:id", requireModuloOuRole("configuracoes", "update", "Administrador Geral", "Director Geral"), organizacaoController.update);
+router.delete("/:id", requireModuloOuRole("configuracoes", "delete", "Administrador Geral"), organizacaoController.remove);
 
-router.post("/:id/logo", requireRole("Administrador Geral", "Director Geral"), async function (req, res) {
+router.post("/:id/logo", requireModuloOuRole("configuracoes", "update", "Administrador Geral", "Director Geral"), async function (req, res) {
   try {
     var org = await Organizacao.findByPk(req.params.id);
     if (!org) return res.status(404).json({ error: "Organizacao nao encontrada" });
@@ -21,25 +22,26 @@ router.post("/:id/logo", requireRole("Administrador Geral", "Director Geral"), a
       return res.status(400).json({ error: "Nenhum ficheiro enviado" });
     }
 
-    var logo = req.files.logo;
-    var ext = path.extname(logo.name) || ".png";
-    var filename = "logo_" + org.id + ext;
-    var uploadDir = path.join(__dirname, "..", "uploads", "logos");
+    var guardado = await guardarFicheiro({
+      file: req.files.logo,
+      pasta: "logos",
+      organizacao_id: req.utilizador.organizacao_id,
+      carregado_por: req.utilizador.id,
+    });
 
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+    // O logo antigo (Cloudinary ou disco) deixa de ser usado
+    if (org.logo_url) {
+      await apagarFicheiroDeUrl(org.logo_url);
     }
 
-    var filepath = path.join(uploadDir, filename);
-    await logo.mv(filepath);
-
-    var logoUrl = "/uploads/logos/" + filename + "?v=" + Date.now();
+    var logoUrl = urlDoFicheiro(guardado) + "?v=" + Date.now();
     await org.update({ logo_url: logoUrl });
 
     return res.status(200).json({ mensagem: "Logo atualizado com sucesso", dados: { logo_url: logoUrl } });
   } catch (e) {
+    var limite = /demasiado grande/i.test(e.message);
     console.log("Erro ao upload logo:", e.message);
-    return res.status(500).json({ error: "Erro ao fazer upload do logo" });
+    return res.status(limite ? 413 : 500).json({ error: limite ? e.message : "Erro ao fazer upload do logo" });
   }
 });
 

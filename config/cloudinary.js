@@ -1,3 +1,9 @@
+// Garante que o .env ja foi lido antes de configurar: este ficheiro pode ser
+// exigido (require) antes de config/index.js, e sem as variaveis o SDK
+// recebe api_key indefinida e falha em cada upload.
+var dotenv = require("dotenv");
+dotenv.config({ path: __dirname + "/../.env" });
+
 var cloudinary = require("cloudinary").v2;
 
 cloudinary.config({

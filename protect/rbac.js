@@ -1,13 +1,73 @@
+var MODULOS_SISTEMA = [
+  { chave: "colaboradores", nome: "Colaboradores" },
+  { chave: "contratos", nome: "Contratos" },
+  { chave: "departamentos", nome: "Departamentos" },
+  { chave: "assiduidade", nome: "Assiduidade" },
+  { chave: "faltas", nome: "Faltas e Atrasos" },
+  { chave: "ferias", nome: "Férias" },
+  { chave: "avaliacao", nome: "Avaliação" },
+  { chave: "formacao", nome: "Formação" },
+  { chave: "folha_salarial", nome: "Folha Salarial" },
+  { chave: "pedidos", nome: "Pedidos" },
+  { chave: "advertencias", nome: "Advertências" },
+  { chave: "utilizadores", nome: "Utilizadores" },
+  { chave: "relatorios", nome: "Relatórios" },
+  { chave: "configuracoes", nome: "Configurações" },
+  { chave: "portal", nome: "Portal" },
+  { chave: "comunicados", nome: "Comunicados" },
+  { chave: "tarefas", nome: "Gestão de Tarefas" },
+  // NOTA: "creditos" fica de fora de propósito — o módulo é exclusivo do
+  // Administrador (nível 4) e não é gerido pela matriz de permissões.
+];
+
 var normalizarPermissoes = function (perm) {
   if (!perm) return {};
-  if (typeof perm === "string") {
+  var p = perm;
+  var tentativas = 0;
+  while (typeof p === "string" && tentativas < 3) {
     try {
-      return JSON.parse(perm);
+      p = JSON.parse(p);
     } catch (e) {
       return {};
     }
+    tentativas++;
   }
-  return perm;
+  if (p && typeof p === "object" && !Array.isArray(p)) return p;
+  return {};
+};
+
+// Normaliza as permissoes de um perfil para o formato actual do sistema:
+// - descarta chaves antigas/desconhecidas (licencas, comunicacao, ...);
+// - expande a chave antiga "_all" (concedia operacoes a todos os modulos);
+// - qualquer operacao concedida implica "read" (sem ler nada funciona).
+var normalizarPermissoesSistema = function (perm) {
+  var p = normalizarPermissoes(perm);
+  var conhecidas = {};
+  MODULOS_SISTEMA.forEach(function (m) { conhecidas[m.chave] = true; });
+
+  var out = {};
+  Object.keys(p).forEach(function (k) {
+    if (!conhecidas[k]) return;
+    out[k] = Array.isArray(p[k]) ? p[k].slice() : [];
+  });
+
+  var todos = Array.isArray(p._all) ? p._all : [];
+  if (todos.length > 0) {
+    MODULOS_SISTEMA.forEach(function (m) {
+      var existentes = out[m.chave] || [];
+      todos.forEach(function (op) {
+        if (existentes.indexOf(op) === -1) existentes.push(op);
+      });
+      out[m.chave] = existentes;
+    });
+  }
+
+  Object.keys(out).forEach(function (mod) {
+    var ops = out[mod];
+    if (ops.length > 0 && ops.indexOf("read") === -1) ops.push("read");
+  });
+
+  return out;
 };
 
 // Perfis efetivos de um utilizador (perfil principal + perfis adicionais)
@@ -28,7 +88,7 @@ var fundirPermissoes = function (perfis) {
   perfis.forEach(function (p) {
     if (!p) return;
     if ((p.nivel || 0) > nivel) nivel = p.nivel;
-    var perm = normalizarPermissoes(p.permissoes);
+    var perm = normalizarPermissoesSistema(p.permissoes);
     Object.keys(perm).forEach(function (mod) {
       var ops = Array.isArray(perm[mod]) ? perm[mod] : [];
       var existentes = merged[mod] || [];
@@ -161,4 +221,54 @@ var requireModulo = function (modulo, operacao) {
   };
 };
 
-module.exports = { requireRole, requireLevel, requirePermission, requireModulo, normalizarPermissoes, perfisUtilizador, fundirPermissoes, prepararUtilizador };
+// Igual ao requireModulo mas passa TAMBÉM pelos perfis indicados pelo nome
+// (compatibilidade com os perfis clássicos do sistema). Ou seja: a permissão
+// dada na matriz funciona E os perfis históricos continuam a funcionar.
+var requireModuloOuRole = function (modulo, operacao) {
+  var roles = Array.prototype.slice.call(arguments, 2);
+  return function (req, res, next) {
+    if (!req.utilizador) {
+      return res.status(403).json({ error: "Perfil não encontrado" });
+    }
+
+    var perfis = perfisUtilizador(req.utilizador);
+    var fundido = fundirPermissoes(perfis);
+
+    if (fundido.nivel >= 4) {
+      return next();
+    }
+
+    if (fundido.permissoes[modulo] && fundido.permissoes[modulo].indexOf(operacao) !== -1) {
+      return next();
+    }
+
+    var rolesLower = roles.map(function (r) { return r.toLowerCase(); });
+    var temPerfil = perfis.some(function (p) {
+      return p && rolesLower.indexOf(String(p.nome).toLowerCase()) !== -1;
+    });
+    if (temPerfil) {
+      return next();
+    }
+
+    return res.status(403).json({
+      error: "Sem permissão para esta operação",
+      modulo: modulo,
+      operacao: operacao,
+      roles_necessarios: roles,
+    });
+  };
+};
+
+module.exports = {
+  MODULOS_SISTEMA,
+  requireRole,
+  requireLevel,
+  requirePermission,
+  requireModulo,
+  requireModuloOuRole,
+  normalizarPermissoes,
+  normalizarPermissoesSistema,
+  perfisUtilizador,
+  fundirPermissoes,
+  prepararUtilizador,
+};

@@ -17,9 +17,14 @@ var OcorrenciaDisciplinar = require("./Disciplinar");
 var { Vencimento, Pagamento } = require("./FolhaSalarial");
 var { Credito, CreditoMovimento } = require("./Credito");
 var { PicagemBiometrico } = require("./Biometro");
+var Feriado = require("./Feriado");
+var EscalaSemanal = require("./EscalaSemanal");
 var { Aviso } = require("./Comunicacao");
+var { ComunicacaoAnexo } = require("./ComunicacaoAnexo");
 var Notificacao = require("./Notificacao");
 var PedidoColaborador = require("./PedidoColaborador");
+var Ficheiro = require("./Ficheiro");
+var { Tarefa, TarefaEvento } = require("./Tarefa");
 var LogAuditoria = require("./LogAuditoria");
 
 // Organizacao -> Utilizadores
@@ -156,6 +161,10 @@ CreditoMovimento.belongsTo(Pagamento, { foreignKey: "pagamento_id", as: "pagamen
 PicagemBiometrico.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador", constraints: false });
 Colaborador.hasMany(PicagemBiometrico, { foreignKey: "colaborador_id", as: "picagens_biometrico", constraints: false });
 
+// Colaborador -> Escala semanal (sem FK a nivel de BD, compatibilidade TiDB)
+Colaborador.hasMany(EscalaSemanal, { foreignKey: "colaborador_id", as: "escalas_semanais", constraints: false });
+EscalaSemanal.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador", constraints: false });
+
 // Utilizador -> Notificacoes
 Utilizador.hasMany(Notificacao, { foreignKey: "utilizador_id", as: "notificacoes" });
 Notificacao.belongsTo(Utilizador, { foreignKey: "utilizador_id", as: "utilizador" });
@@ -184,9 +193,25 @@ Aviso.belongsTo(Utilizador, { foreignKey: "criado_por", as: "criador" });
 Departamento.hasMany(Aviso, { foreignKey: "departamento_id", as: "avisos" });
 Aviso.belongsTo(Departamento, { foreignKey: "departamento_id", as: "departamento" });
 
+// Aviso -> Anexos (guardados na BD). Sem FK a nivel de BD (TiDB).
+Aviso.hasMany(ComunicacaoAnexo, { foreignKey: "comunicado_id", as: "anexos", constraints: false });
+ComunicacaoAnexo.belongsTo(Aviso, { foreignKey: "comunicado_id", as: "comunicado", constraints: false });
+
 // LogAuditoria -> Utilizador
 Utilizador.hasMany(LogAuditoria, { foreignKey: "utilizador_id", as: "logs" });
 LogAuditoria.belongsTo(Utilizador, { foreignKey: "utilizador_id", as: "utilizador" });
+
+// ==================== TAREFAS (gestao de tarefas) ====================
+// Sem FKs a nivel de BD para compatibilidade com TiDB.
+Colaborador.hasMany(Tarefa, { foreignKey: "colaborador_id", as: "tarefas", constraints: false });
+Tarefa.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador", constraints: false });
+
+Utilizador.hasMany(Tarefa, { foreignKey: "atribuido_por", as: "tarefas_atribuidas", constraints: false });
+Tarefa.belongsTo(Utilizador, { foreignKey: "atribuido_por", as: "atribuidor", constraints: false });
+
+Tarefa.hasMany(TarefaEvento, { foreignKey: "tarefa_id", as: "eventos", constraints: false });
+TarefaEvento.belongsTo(Tarefa, { foreignKey: "tarefa_id", as: "tarefa", constraints: false });
+TarefaEvento.belongsTo(Utilizador, { foreignKey: "utilizador_id", as: "utilizador", constraints: false });
 
 // Departamento -> Departamento (hierarquia)
 Departamento.belongsTo(Departamento, { foreignKey: "departamento_pai_id", as: "pai" });
@@ -333,6 +358,10 @@ var syncDatabase = async () => {
         await sequelize.query("ALTER TABLE `colaboradores` ADD COLUMN `id_biometrico` VARCHAR(30) NULL");
         console.log(" Coluna 'id_biometrico' adicionada!");
       }
+      if (nomes6.indexOf("dias_descanso") === -1) {
+        await sequelize.query("ALTER TABLE `colaboradores` ADD COLUMN `dias_descanso` VARCHAR(30) NULL DEFAULT '0,6'");
+        console.log(" Coluna 'dias_descanso' adicionada!");
+      }
     } catch (alterErr6) {
       console.log(" Aviso: problema ao tornar nome_completo nullable:", alterErr6.message);
     }
@@ -358,6 +387,46 @@ var syncDatabase = async () => {
       );
     } catch (picErr) {
       console.log(" Aviso: problema ao garantir tabela picagens_biometrico:", picErr.message);
+    }
+
+    // Tabela de feriados (fallback caso as migracoes falhem): dias em que o
+    // biometro nao marca ninguem como Ausente.
+    try {
+      await sequelize.query(
+        "CREATE TABLE IF NOT EXISTS `feriados` (" +
+        "`id` CHAR(36) NOT NULL, " +
+        "`data` DATE NOT NULL, " +
+        "`descricao` VARCHAR(200) NULL, " +
+        "`organizacao_id` CHAR(36) NULL, " +
+        "`createdAt` DATETIME NOT NULL, " +
+        "`updatedAt` DATETIME NOT NULL, " +
+        "PRIMARY KEY (`id`), " +
+        "UNIQUE KEY `feriados_data_unique` (`data`)" +
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+      );
+    } catch (feriadoErr) {
+      console.log(" Aviso: problema ao garantir tabela feriados:", feriadoErr.message);
+    }
+
+    // Tabela de escalas semanais (fallback caso as migracoes falhem): horario
+    // de entrada/saida por colaborador e dia da semana (turnos e escalas).
+    try {
+      await sequelize.query(
+        "CREATE TABLE IF NOT EXISTS `escalas_semanais` (" +
+        "`id` CHAR(36) NOT NULL, " +
+        "`colaborador_id` CHAR(36) NOT NULL, " +
+        "`dia_semana` INT NOT NULL, " +
+        "`hora_entrada` VARCHAR(5) NULL, " +
+        "`hora_saida` VARCHAR(5) NULL, " +
+        "`createdAt` DATETIME NOT NULL, " +
+        "`updatedAt` DATETIME NOT NULL, " +
+        "PRIMARY KEY (`id`), " +
+        "UNIQUE KEY `escalas_semanais_unique` (`colaborador_id`, `dia_semana`), " +
+        "KEY `escalas_colaborador_idx` (`colaborador_id`)" +
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+      );
+    } catch (escalaErr) {
+      console.log(" Aviso: problema ao garantir tabela escalas_semanais:", escalaErr.message);
     }
     try {
       var resultado7 = await sequelize.query("SHOW COLUMNS FROM `contratos`");
@@ -478,8 +547,14 @@ module.exports = {
   Credito,
   CreditoMovimento,
   PicagemBiometrico,
+  Feriado,
+  EscalaSemanal,
   Aviso,
+  ComunicacaoAnexo,
   Notificacao,
   PedidoColaborador,
+  Ficheiro,
+  Tarefa,
+  TarefaEvento,
   LogAuditoria,
 };

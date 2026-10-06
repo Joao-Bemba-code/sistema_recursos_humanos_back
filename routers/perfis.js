@@ -2,40 +2,13 @@ var { Op } = require("sequelize");
 var express = require("express");
 var router = express.Router();
 var { Perfil, Utilizador, UtilizadorPerfil } = require("../models");
-var { requireRole, normalizarPermissoes } = require("../protect/rbac");
-
-var MODULOS_SISTEMA = [
-  { chave: "colaboradores", nome: "Colaboradores" },
-  { chave: "contratos", nome: "Contratos" },
-  { chave: "departamentos", nome: "Departamentos" },
-  { chave: "assiduidade", nome: "Assiduidade" },
-  { chave: "faltas", nome: "Faltas e Atrasos" },
-  { chave: "ferias", nome: "Férias" },
-  { chave: "avaliacao", nome: "Avaliação" },
-  { chave: "formacao", nome: "Formação" },
-  { chave: "folha_salarial", nome: "Folha Salarial" },
-  { chave: "pedidos", nome: "Pedidos" },
-  { chave: "creditos", nome: "Créditos" },
-  { chave: "advertencias", nome: "Advertências" },
-  { chave: "utilizadores", nome: "Utilizadores" },
-  { chave: "relatorios", nome: "Relatórios" },
-  { chave: "configuracoes", nome: "Configurações" },
-  { chave: "portal", nome: "Portal" },
-  { chave: "comunicados", nome: "Comunicados" },
-];
+var { requireModuloOuRole, normalizarPermissoes, MODULOS_SISTEMA, normalizarPermissoesSistema } = require("../protect/rbac");
 
 var filtrarPermissoes = function (perm) {
-  var p = normalizarPermissoes(perm);
-  var chaves = {};
-  MODULOS_SISTEMA.forEach(function (m) { chaves[m.chave] = true; });
-  var out = {};
-  Object.keys(p).forEach(function (k) {
-    if (chaves[k]) out[k] = p[k];
-  });
-  return out;
+  return normalizarPermissoesSistema(perm);
 };
 
-router.get("/", requireRole("Administrador Geral", "Director Geral", "Director de Recursos Humanos"), async function (req, res) {
+router.get("/", requireModuloOuRole("utilizadores", "read", "Administrador Geral", "Director Geral", "Director de Recursos Humanos"), async function (req, res) {
   try {
     var perfis = await Perfil.findAll({
       order: [["nivel", "DESC"], ["nome", "ASC"]],
@@ -49,7 +22,7 @@ router.get("/", requireRole("Administrador Geral", "Director Geral", "Director d
         nome: perfil.nome,
         descricao: perfil.descricao,
         nivel: perfil.nivel,
-        permissoes: normalizarPermissoes(perfil.permissoes),
+        permissoes: normalizarPermissoesSistema(perfil.permissoes),
         activo: perfil.activo,
         total_utilizadores: count + countExtra,
       };
@@ -65,7 +38,7 @@ router.get("/", requireRole("Administrador Geral", "Director Geral", "Director d
   }
 });
 
-router.get("/:id", requireRole("Administrador Geral", "Director Geral", "Director de Recursos Humanos"), async function (req, res) {
+router.get("/:id", requireModuloOuRole("utilizadores", "read", "Administrador Geral", "Director Geral", "Director de Recursos Humanos"), async function (req, res) {
   try {
     var perfil = await Perfil.findByPk(req.params.id);
     if (!perfil) {
@@ -100,7 +73,7 @@ router.get("/:id", requireRole("Administrador Geral", "Director Geral", "Directo
         nome: perfil.nome,
         descricao: perfil.descricao,
         nivel: perfil.nivel,
-        permissoes: normalizarPermissoes(perfil.permissoes),
+        permissoes: normalizarPermissoesSistema(perfil.permissoes),
         activo: perfil.activo,
         utilizadores: utilizadores,
       },
@@ -111,7 +84,7 @@ router.get("/:id", requireRole("Administrador Geral", "Director Geral", "Directo
   }
 });
 
-router.put("/:id", requireRole("Administrador Geral"), async function (req, res) {
+router.put("/:id", requireModuloOuRole("utilizadores", "update", "Administrador Geral"), async function (req, res) {
   try {
     var perfil = await Perfil.findByPk(req.params.id);
     if (!perfil) {
@@ -134,7 +107,7 @@ router.put("/:id", requireRole("Administrador Geral"), async function (req, res)
         nome: perfil.nome,
         descricao: perfil.descricao,
         nivel: perfil.nivel,
-        permissoes: normalizarPermissoes(perfil.permissoes),
+        permissoes: normalizarPermissoesSistema(perfil.permissoes),
         activo: perfil.activo,
       },
     });
@@ -144,7 +117,7 @@ router.put("/:id", requireRole("Administrador Geral"), async function (req, res)
   }
 });
 
-router.post("/", requireRole("Administrador Geral"), async function (req, res) {
+router.post("/", requireModuloOuRole("utilizadores", "create", "Administrador Geral"), async function (req, res) {
   try {
     var { nome, descricao, nivel, permissoes } = req.body;
 

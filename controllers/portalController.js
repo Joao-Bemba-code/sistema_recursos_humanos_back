@@ -1,4 +1,4 @@
-var { Colaborador, Ferias, SolicitacaoFerias, AvaliacaoDesempenho, CicloAvaliacao, PedidoColaborador, RegistoPresenca, Contrato, Pagamento } = require("../models");
+var { Colaborador, Ferias, SolicitacaoFerias, AvaliacaoDesempenho, CicloAvaliacao, PedidoColaborador, RegistoPresenca, Contrato, Pagamento, Tarefa } = require("../models");
 var { Op, Sequelize } = require("sequelize");
 
 var formatarDataLocal = function (d) {
@@ -117,7 +117,7 @@ var getPortalStats = async function (req, res) {
       return res.status(200).json({
         dados: {
           ferias: { disponiveis: 22, gozados: 0, planeados: 0, por_mes: [] },
-          avaliacoes: { pontuacao: 0, ciclos: [] },
+          avaliacoes: { pontuacao: 0, ciclos: [], tarefas: [], total_tarefas: 0, media_tarefas: 0, origem: null },
           pedidos_recentes: [],
           presencas: [],
           desconto_estimado: { faltas_mes: 0, horas_descontar: 0, valor: 0, salario_diario: 0 },
@@ -173,6 +173,45 @@ var getPortalStats = async function (req, res) {
       });
     });
 
+    // Avaliacoes das tarefas (nota automatica 0-20 gerada ao concluir)
+    var tarefasAvaliadas = await Tarefa.findAll({
+      where: {
+        colaborador_id: colaborador.id,
+        estado: { [Op.in]: ["Concluida", "Validada"] },
+        nota: { [Op.ne]: null },
+      },
+      attributes: [
+        "id", "titulo", "nota", "classificacao", "prazo", "prazo_hora",
+        "data_conclusao", "atraso_dias", "progresso", "estado",
+      ],
+      order: [["data_conclusao", "DESC"], ["updatedAt", "DESC"]],
+      limit: 8,
+    });
+
+    var somaNotasTarefas = 0;
+    var listaTarefas = [];
+    tarefasAvaliadas.forEach(function (t) {
+      var notaT = parseFloat(t.nota);
+      somaNotasTarefas += notaT;
+      listaTarefas.push({
+        id: t.id,
+        titulo: t.titulo,
+        nota: notaT,
+        classificacao: t.classificacao,
+        prazo: t.prazo ? String(t.prazo).slice(0, 10) : null,
+        prazo_hora: t.prazo_hora ? String(t.prazo_hora).slice(0, 5) : null,
+        data_conclusao: t.data_conclusao,
+        atraso_dias: t.atraso_dias || 0,
+        no_prazo: !(t.atraso_dias > 0),
+        estado: t.estado,
+      });
+    });
+    var mediaTarefas = listaTarefas.length > 0
+      ? Math.round((somaNotasTarefas / listaTarefas.length) * 100) / 100
+      : 0;
+    // O cartao mostra /20: se nao ha avaliacao de ciclo, usa a media das tarefas
+    var pontuacao = ultimaNota > 0 ? ultimaNota : mediaTarefas;
+
     // Pedidos recentes
     var pedidos = await PedidoColaborador.findAll({
       where: { colaborador_id: colaborador.id },
@@ -217,7 +256,11 @@ var getPortalStats = async function (req, res) {
           por_mes: feriasPorMes,
         },
         avaliacoes: {
-          pontuacao: ultimaNota,
+          pontuacao: pontuacao,
+          origem: ultimaNota > 0 ? "ciclo" : (mediaTarefas > 0 ? "tarefas" : null),
+          media_tarefas: mediaTarefas,
+          total_tarefas: listaTarefas.length,
+          tarefas: listaTarefas,
           ciclos: ciclos,
         },
         pedidos_stats: {

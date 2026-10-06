@@ -1,16 +1,8 @@
 var jwt = require("jsonwebtoken");
 var { Utilizador, Perfil, Organizacao, Colaborador } = require("../models");
-var { prepararUtilizador, fundirPermissoes, normalizarPermissoes } = require("../protect/rbac");
+var { prepararUtilizador, fundirPermissoes, normalizarPermissoesSistema } = require("../protect/rbac");
 
 var SENHA_PADRAO = "colaborador123";
-
-// O perfil "Colaborador" e so para colaboradores sem funcao administrativa:
-// independentemente do que estiver guardado na BD, no login recebe apenas
-// permissoes do portal (evita que vejam os modulos de gestao).
-var PERMISSOES_COLABORADOR = {
-  portal: ["read", "update"],
-  ferias: ["create", "read"],
-};
 
 var generateToken = function (utilizador) {
   return jwt.sign(
@@ -42,10 +34,10 @@ var serializarUtilizador = function (utilizador) {
   });
 
   var perfisJson = perfisTodos.map(function (p) {
-    var permissoes = normalizarPermissoes(p.permissoes);
-    if (String(p.nome || "").toLowerCase() === "colaborador") {
-      permissoes = PERMISSOES_COLABORADOR;
-    }
+    // Normalizacao do sistema: expande "_all", acrescenta "read" quando ha
+    // operacoes e descarta chaves antigas. O frontend usa estes perfis para
+    // decidir o que mostrar no menu.
+    var permissoes = normalizarPermissoesSistema(p.permissoes);
     return {
       id: p.id,
       nome: p.nome,

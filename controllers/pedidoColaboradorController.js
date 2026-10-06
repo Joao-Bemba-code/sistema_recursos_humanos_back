@@ -1,8 +1,7 @@
 var { Op } = require("sequelize");
-var path = require("path");
-var fs = require("fs");
 var { PedidoColaborador, Colaborador, Utilizador, Perfil, Notificacao, RegistoPresenca } = require("../models");
 var notificacaoController = require("./notificacaoController");
+var { guardarFicheiro, urlDoFicheiro, apagarFicheiroDeUrl } = require("../helpers/ficheiros");
 
 var list = async function (req, res) {
   try {
@@ -125,16 +124,13 @@ var create = async function (req, res) {
     });
 
     if (req.files && req.files.ficheiro) {
-      var ficheiro = req.files.ficheiro;
-      var ext = path.extname(ficheiro.name) || ".pdf";
-      var filename = "pedido_" + pedido.id + "_" + Date.now() + ext;
-      var uploadDir = path.join(__dirname, "..", "uploads", "pedidos");
-      if (!fs.existsSync(uploadDir)) {
-        fs.mkdirSync(uploadDir, { recursive: true });
-      }
-      var caminho = path.join(uploadDir, filename);
-      await ficheiro.mv(caminho);
-      await pedido.update({ documento: "/uploads/pedidos/" + filename });
+      var guardado = await guardarFicheiro({
+        file: req.files.ficheiro,
+        pasta: "pedidos",
+        organizacao_id: req.utilizador.organizacao_id,
+        carregado_por: req.utilizador.id,
+      });
+      await pedido.update({ documento: urlDoFicheiro(guardado) });
     }
 
     var resultado = await PedidoColaborador.findByPk(pedido.id, {
@@ -350,10 +346,7 @@ var remove = async function (req, res) {
     }
 
     if (pedido.documento) {
-      var caminho = path.join(__dirname, "..", pedido.documento);
-      if (fs.existsSync(caminho)) {
-        fs.unlinkSync(caminho);
-      }
+      await apagarFicheiroDeUrl(pedido.documento);
     }
 
     await pedido.destroy();

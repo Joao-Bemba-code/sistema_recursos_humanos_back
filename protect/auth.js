@@ -51,6 +51,20 @@ var authenticate = async (req, res, next) => {
   }
 };
 
+// Como o authenticate, mas aceita o token tambem via ?token=... - usado
+// pelas rotas de ficheiros, onde <img> e <a href> nao enviam o header
+// Authorization.
+var authenticateFlexivel = async (req, res, next) => {
+  var header = req.headers.authorization;
+  if (!header || !header.startsWith("Bearer ")) {
+    var tokenQuery = req.query && req.query.token;
+    if (tokenQuery) {
+      req.headers.authorization = "Bearer " + tokenQuery;
+    }
+  }
+  return authenticate(req, res, next);
+};
+
 var authenticateOptional = async (req, res, next) => {
   try {
     var header = req.headers.authorization;
@@ -81,4 +95,4 @@ var authenticateOptional = async (req, res, next) => {
   }
 };
 
-module.exports = { authenticate, authenticateOptional };
+module.exports = { authenticate, authenticateOptional, authenticateFlexivel };

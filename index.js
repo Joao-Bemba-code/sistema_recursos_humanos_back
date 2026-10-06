@@ -3,6 +3,11 @@ var fileUpload = require("express-fileupload");
 var dotenv = require("dotenv");
 dotenv.config();
 
+if (!process.env.SECRET) {
+  console.error("SECRET nao definido no .env. Configure SECRET=<valor aleatorio> antes de iniciar.");
+  process.exit(1);
+}
+
 var cors = require("cors");
 var helmet = require("helmet");
 var morgan = require("morgan");
@@ -34,6 +39,10 @@ var ocorrenciaRoutes = require("./routers/ocorrencias");
 var comunicacaoRoutes = require("./routers/comunicacoes");
 var creditoRoutes = require("./routers/creditos");
 var biometroRoutes = require("./routers/biometro");
+var feriadoRoutes = require("./routers/feriados");
+var escalaRoutes = require("./routers/escalas");
+var ficheiroRoutes = require("./routers/ficheiros");
+var tarefaRoutes = require("./routers/tarefas");
 
 // CORREÇÃO: Importação protegida do módulo seed para evitar o crash MODULE_NOT_FOUND
 var seed = null;
@@ -81,9 +90,9 @@ app.use(fileUpload({
   createParentPath: true,
 }));
 
-// Body parsing
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+// Body parsing (25mb para suportar anexos de comunicados em base64)
+app.use(express.json({ limit: "25mb" }));
+app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
 // Sanitizacao
 app.use(sanitizeBody);
@@ -126,6 +135,10 @@ app.use("/api/ocorrencias", authenticate, ocorrenciaRoutes);
 app.use("/api/comunicados", authenticate, comunicacaoRoutes);
 app.use("/api/creditos", authenticate, creditoRoutes);
 app.use("/api/biometro", biometroRoutes);
+app.use("/api/feriados", authenticate, feriadoRoutes);
+app.use("/api/escalas", authenticate, escalaRoutes);
+app.use("/api/ficheiros", ficheiroRoutes);
+app.use("/api/tarefas", authenticate, tarefaRoutes);
 
 // Health check
 app.get("/health", function (req, res) {
@@ -176,6 +189,15 @@ app.listen(port, async function () {
     await syncDatabase();
   } catch (e) {
     console.log(" Erro ao sincronizar colunas (continuando):", e.message);
+  }
+
+  // Migracao dos ficheiros do disco (uploads/) para o Cloudinary - garante
+  // que os documentos existentes sobrevivem aos deploys do Render.
+  try {
+    var { importarUploadsParaBD } = require("./helpers/ficheiros");
+    await importarUploadsParaBD();
+  } catch (e) {
+    console.log(" Erro na migracao de ficheiros (continuando):", e.message);
   }
 
   try {

@@ -10,3 +10,4 @@ yarn-error.log*
 srv.log
 srv*.log
 srv*.err.log
+server*.log

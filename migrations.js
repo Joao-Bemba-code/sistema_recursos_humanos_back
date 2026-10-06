@@ -200,6 +200,73 @@ var migrations = async function () {
     // ==================== COLABORADORES ====================
     await alterarColuna("colaboradores", "nome_completo", "VARCHAR(200) NULL");
     await adicionarColuna("colaboradores", "id_biometrico", "VARCHAR(30) NULL");
+    await adicionarColuna("colaboradores", "dias_descanso", "VARCHAR(30) NULL DEFAULT '0,6'");
+
+    // ==================== FERIADOS ====================
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `feriados` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`data` DATE NOT NULL, " +
+      "`descricao` VARCHAR(200) NULL, " +
+      "`organizacao_id` CHAR(36) NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "UNIQUE KEY `feriados_data_unique` (`data`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'feriados' garantida!");
+
+    // Seed dos feriados nacionais de Angola 2026 (so quando a tabela esta vazia;
+    // se o RH apagar algum feriado, o arranque nao o volta a criar so por si)
+    try {
+      var [feriadosContagem] = await sequelize.query("SELECT COUNT(*) AS total FROM `feriados`");
+      var totalFeriados = feriadosContagem && feriadosContagem.length ? parseInt(feriadosContagem[0].total, 10) : 0;
+      if (totalFeriados === 0) {
+        var feriadosAngola2026 = [
+          ["2026-01-01", "Ano Novo"],
+          ["2026-02-04", "Dia do Início da Luta Armada de Libertação Nacional"],
+          ["2026-02-17", "Carnaval"],
+          ["2026-03-08", "Dia Internacional da Mulher"],
+          ["2026-04-03", "Sexta-Feira Santa"],
+          ["2026-04-04", "Dia da Paz e da Reconciliação Nacional"],
+          ["2026-05-01", "Dia Internacional do Trabalhador"],
+          ["2026-09-17", "Dia do Fundador da Nação e do Herói Nacional"],
+          ["2026-11-02", "Dia dos Finados"],
+          ["2026-11-11", "Dia da Independência Nacional"],
+          ["2026-12-25", "Natal"],
+        ];
+        for (var fi = 0; fi < feriadosAngola2026.length; fi++) {
+          await sequelize.query(
+            "INSERT INTO `feriados` (`id`, `data`, `descricao`, `createdAt`, `updatedAt`) VALUES (UUID(), ?, ?, NOW(), NOW())",
+            { replacements: [feriadosAngola2026[fi][0], feriadosAngola2026[fi][1]] }
+          );
+        }
+        console.log(" Feriados nacionais de Angola 2026 carregados!");
+      }
+    } catch (seedFeriadosErr) {
+      console.log(" Aviso: problema ao carregar feriados:", seedFeriadosErr.message);
+    }
+
+    // ==================== ESCALAS SEMANAIS (turnos por colaborador) ====================
+    // Sem FKs a nivel de BD para compatibilidade com TiDB. hora_entrada/hora_saida
+    // preenchidas = dia de trabalho; ambas vazias = descanso. Podem passar da
+    // meia-noite (ex.: 20:00-04:00, saida no dia seguinte).
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `escalas_semanais` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`colaborador_id` CHAR(36) NOT NULL, " +
+      "`dia_semana` INT NOT NULL, " +
+      "`hora_entrada` VARCHAR(5) NULL, " +
+      "`hora_saida` VARCHAR(5) NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "UNIQUE KEY `escalas_semanais_unique` (`colaborador_id`, `dia_semana`), " +
+      "KEY `escalas_colaborador_idx` (`colaborador_id`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'escalas_semanais' garantida!");
 
     // ==================== BIOMETRO: picagens da ponte ZKTeco ====================
     // Sem FKs a nivel de BD para compatibilidade com TiDB
@@ -247,6 +314,106 @@ var migrations = async function () {
     } catch (e) {
       console.log(" Aviso: problema ao expandir enum tipo de pedidos_colaborador:", e.message);
     }
+
+    // ==================== ANEXOS DE COMUNICADOS (guardados na BD) ====================
+    // Os documentos ficam na base de dados (base64) para sobreviverem aos
+    // reinicios/deploys da instancia gratuita do Render (o disco e volatil).
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `comunicado_anexos` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`comunicado_id` CHAR(36) NOT NULL, " +
+      "`nome` VARCHAR(255) NOT NULL, " +
+      "`tipo` VARCHAR(150) NULL, " +
+      "`tamanho` INT NULL, " +
+      "`dados` LONGTEXT NOT NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "KEY `comunicado_anexos_comunicado_idx` (`comunicado_id`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'comunicado_anexos' garantida!");
+
+    // ==================== PERFIL COLABORADOR: minimo garantido (uma vez) ====================
+    // Ate agora o login forjava permissoes minimas para o perfil "Colaborador"
+    // (independentemente da BD). Esse forjamento foi removido: a matriz da BD
+    // passa a ser respeitada. Para nao reabrir a vulnerabilidade do portal,
+    // aplica-se UMA vez o minimo ao perfil "Colaborador" e marca-se com
+    // minimo_aplicado=1; a partir dai o RH gere o perfil livremente.
+    await adicionarColuna("perfis", "minimo_aplicado", "BOOLEAN NOT NULL DEFAULT false");
+    try {
+      var [colabLinhas] = await sequelize.query(
+        "SELECT `id`, `permissoes`, `minimo_aplicado` FROM `perfis` WHERE `nome` = 'Colaborador' LIMIT 1"
+      );
+      var colab = colabLinhas && colabLinhas.length ? colabLinhas[0] : null;
+      if (colab && !colab.minimo_aplicado) {
+        await sequelize.query(
+          "UPDATE `perfis` SET `permissoes` = ?, `minimo_aplicado` = 1 WHERE `id` = ?",
+          {
+            replacements: [
+              JSON.stringify({ portal: ["read", "update"], ferias: ["create", "read"] }),
+              colab.id,
+            ],
+          }
+        );
+        console.log(" Perfil 'Colaborador' reposto ao minimo (uma unica vez)!");
+      }
+    } catch (e) {
+      console.log(" Aviso: problema ao repor o perfil 'Colaborador':", e.message);
+    }
+
+    // ==================== MODULO TAREFAS: permissoes por perfil ====================
+    // Todos os perfis precisam de VER as tarefas e ACTUALIZAR o progresso das
+    // suas (o controller restringe ao proprio colaborador quando nao e gestor).
+    // Os perfis de gestao recebem tambem "create" e "delete" (atribuir,
+    // validar, eliminar). Acrescenta-se apenas o que falta - idempotente.
+    try {
+      var NOMES_GESTOR_TAREFAS = [
+        "administrador geral",
+        "director geral",
+        "director de recursos humanos",
+        "técnico de rh",
+        "tecnico de rh",
+      ];
+      var [todosPerfis] = await sequelize.query(
+        "SELECT `id`, `nome`, `nivel`, `permissoes` FROM `perfis`"
+      );
+      for (var pi = 0; pi < todosPerfis.length; pi++) {
+        var perfilT = todosPerfis[pi];
+        var permT = perfilT.permissoes;
+        if (typeof permT === "string") {
+          try { permT = JSON.parse(permT); } catch (eParseT) { permT = {}; }
+        }
+        if (!permT || typeof permT !== "object" || Array.isArray(permT)) permT = {};
+        var opsT = Array.isArray(permT.tarefas) ? permT.tarefas.slice() : [];
+        var desejadas = ["read", "update"];
+        var ehGestorT = (perfilT.nivel || 0) >= 2 ||
+          NOMES_GESTOR_TAREFAS.indexOf(String(perfilT.nome).toLowerCase()) !== -1;
+        if (ehGestorT) desejadas = desejadas.concat(["create", "delete"]);
+        var mudouT = false;
+        desejadas.forEach(function (op) {
+          if (opsT.indexOf(op) === -1) {
+            opsT.push(op);
+            mudouT = true;
+          }
+        });
+        if (mudouT) {
+          permT.tarefas = opsT;
+          await sequelize.query(
+            "UPDATE `perfis` SET `permissoes` = ? WHERE `id` = ?",
+            { replacements: [JSON.stringify(permT), perfilT.id] }
+          );
+          console.log(" Perfil '" + perfilT.nome + "' recebeu acesso ao modulo de tarefas!");
+        }
+      }
+    } catch (eTarefas) {
+      console.log(" Aviso: problema ao conceder permissoes de tarefas:", eTarefas.message);
+    }
+
+    // ==================== TAREFAS: prazo com hora e atraso em minutos ====================
+    await adicionarColuna("tarefas", "prazo_hora", "TIME NULL");
+    await adicionarColuna("tarefas", "atraso_minutos", "INT NOT NULL DEFAULT 0");
+    console.log(" Colunas 'prazo_hora'/'atraso_minutos' em tarefas garantidas!");
 
     console.log(" Migracoes concluidas com sucesso!");
   } catch (e) {

@@ -16,6 +16,14 @@ var Colaborador = sequelize.define("Colaborador", {
     type: DataTypes.STRING(30),
     allowNull: true,
   },
+  // Dias de descanso semanais, no formato do JS getDay: 0=domingo ... 6=sabado.
+  // Ex.: "0,6" = descansa domingo e sabado (padrao). Quem trabalha ao sabado
+  // fica por ex. "0" (so descansa domingo) — e e marcado Ausente se nao picar.
+  dias_descanso: {
+    type: DataTypes.STRING(30),
+    allowNull: true,
+    defaultValue: "0,6",
+  },
   nome_completo: {
     type: DataTypes.STRING(200),
     allowNull: true,

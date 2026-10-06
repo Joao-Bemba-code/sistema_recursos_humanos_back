@@ -1,7 +1,6 @@
 var { Op } = require("sequelize");
-var path = require("path");
-var fs = require("fs");
 var { sequelize, RegistoPresenca, Colaborador } = require("../models");
+var { guardarFicheiro, urlDoFicheiro, apagarFicheiroDeUrl } = require("../helpers/ficheiros");
 
 // Uma falta fica "processada" (flag processada) quando a folha do mes que a
 // descontou e processada. Nao e preciso inferir a partir dos pagamentos.
@@ -270,16 +269,13 @@ var justificar = async function (req, res) {
     };
 
     if (req.files && req.files.documento) {
-      var doc = req.files.documento;
-      var ext = path.extname(doc.name) || ".pdf";
-      var filename = "justificacao_" + id + "_" + Date.now() + ext;
-      var uploadDir = path.join(__dirname, "..", "uploads", "justificacoes");
-      if (!fs.existsSync(uploadDir)) {
-        fs.mkdirSync(uploadDir, { recursive: true });
-      }
-      var caminho = path.join(uploadDir, filename);
-      await doc.mv(caminho);
-      updateData.documento_justificacao = "/uploads/justificacoes/" + filename;
+      var guardado = await guardarFicheiro({
+        file: req.files.documento,
+        pasta: "justificacoes",
+        organizacao_id: req.utilizador.organizacao_id,
+        carregado_por: req.utilizador.id,
+      });
+      updateData.documento_justificacao = urlDoFicheiro(guardado);
     }
 
     await registo.update(updateData);
@@ -308,10 +304,7 @@ var removerJustificacao = async function (req, res) {
     }
 
     if (registo.documento_justificacao) {
-      var caminhoAntigo = path.join(__dirname, "..", registo.documento_justificacao);
-      if (fs.existsSync(caminhoAntigo)) {
-        fs.unlinkSync(caminhoAntigo);
-      }
+      await apagarFicheiroDeUrl(registo.documento_justificacao);
     }
 
     await registo.update({

@@ -99,11 +99,24 @@ var create = async function (req, res) {
     var dados = req.body;
     dados.organizacao_id = req.organizacao_id;
 
-    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico"];
+    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico", "dias_descanso"];
     var chaves = Object.keys(dados);
     for (var i = 0; i < chaves.length; i++) {
       if (dados[chaves[i]] === "" && camposOpcionais.indexOf(chaves[i]) !== -1) {
         dados[chaves[i]] = null;
+      }
+    }
+
+    // Dias de descanso: numeros de 0 (domingo) a 6 (sabado) separados por virgula
+    if (dados.dias_descanso !== undefined && dados.dias_descanso !== null && String(dados.dias_descanso).trim() !== "") {
+      var partesDescanso = String(dados.dias_descanso).split(",");
+      var descansoValido = true;
+      for (var di = 0; di < partesDescanso.length; di++) {
+        var nDia = parseInt(partesDescanso[di].trim(), 10);
+        if (isNaN(nDia) || nDia < 0 || nDia > 6) { descansoValido = false; break; }
+      }
+      if (!descansoValido) {
+        return res.status(400).json({ error: "Dias de descanso inválidos. Use números de 0 (domingo) a 6 (sábado) separados por vírgula, ex.: 0,6" });
       }
     }
 
@@ -146,7 +159,7 @@ var update = async function (req, res) {
     var camposProtegidos = ["id", "organizacao_id", "numero_colaborador", "createdAt", "updatedAt"];
     var camposEnum = ["genero", "estado_civil", "tipo_colaborador", "estado"];
     var camposData = ["data_nascimento", "bi_validade", "data_admissao", "data_desligamento"];
-    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico"];
+    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico", "dias_descanso"];
     var dadosActualizar = {};
 
     var keys = Object.keys(req.body);
@@ -157,6 +170,19 @@ var update = async function (req, res) {
       if (valor === "" && camposOpcionais.indexOf(keys[i]) !== -1) { dadosActualizar[keys[i]] = null; continue; }
       if (valor === undefined) continue;
       dadosActualizar[keys[i]] = valor;
+    }
+
+    // Dias de descanso: numeros de 0 (domingo) a 6 (sabado) separados por virgula
+    if (dadosActualizar.dias_descanso !== undefined && dadosActualizar.dias_descanso !== null && String(dadosActualizar.dias_descanso).trim() !== "") {
+      var partesDescanso = String(dadosActualizar.dias_descanso).split(",");
+      var descansoValido = true;
+      for (var di = 0; di < partesDescanso.length; di++) {
+        var nDia = parseInt(partesDescanso[di].trim(), 10);
+        if (isNaN(nDia) || nDia < 0 || nDia > 6) { descansoValido = false; break; }
+      }
+      if (!descansoValido) {
+        return res.status(400).json({ error: "Dias de descanso inválidos. Use números de 0 (domingo) a 6 (sábado) separados por vírgula, ex.: 0,6" });
+      }
     }
 
     // ID biometrico nao pode estar repetido entre colaboradores

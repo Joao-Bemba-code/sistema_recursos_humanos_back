@@ -36,29 +36,34 @@ function drawFooter(doc, org) {
   doc.fillColor("#000000");
 }
 
-function logoFilePath(url) {
-  var clean = (url || "").split("?")[0];
-  if (clean.startsWith("/uploads/")) {
-    return path.join(__dirname, "..", clean);
-  }
-  return clean;
-}
+var { lerBufferDeUrl } = require("../helpers/ficheiros");
 
-function getLogoPath(org) {
+// Devolve o logo como Buffer (Cloudinary/remoto, /api/ficheiros/...) ou como
+// caminho local (fallback uploads/). Null quando nao ha logo disponivel.
+async function getLogoSrc(org) {
   var def = path.join(__dirname, "..", "uploads", "logos", "logo_default.jpg");
-  if (fs.existsSync(def)) return def;
-  if (org && org.logo_url) {
-    var p = logoFilePath(org.logo_url);
-    if (fs.existsSync(p)) return p;
+  try {
+    if (org && org.logo_url) {
+      var url = String(org.logo_url).split("?")[0];
+      if (/^https?:\/\//.test(url) || url.indexOf("/api/ficheiros/") !== -1 || url.indexOf("/uploads/") !== -1) {
+        var buffer = await lerBufferDeUrl(url);
+        if (buffer && buffer.length) return buffer;
+      } else if (fs.existsSync(url)) {
+        return url;
+      }
+    }
+  } catch (e) {
+    // logo error silently ignored
   }
-  return def;
+  if (fs.existsSync(def)) return def;
+  return null;
 }
 
-function drawLogo(doc, org, x, y, maxW, maxH) {
+async function drawLogo(doc, org, x, y, maxW, maxH) {
   try {
-    var logoPath = getLogoPath(org);
-    if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, x, y, { fit: [maxW, maxH] });
+    var logoSrc = await getLogoSrc(org);
+    if (logoSrc) {
+      doc.image(logoSrc, x, y, { fit: [maxW, maxH] });
       return true;
     }
   } catch (e) {
@@ -229,9 +234,9 @@ exports.folhaSalarial = async function (req, res) {
     var y = 42;
 
     try {
-      var logoPath = getLogoPath(org);
-      if (fs.existsSync(logoPath)) {
-        doc.image(logoPath, pw / 2 - 22.5, y, { fit: [45, 45] });
+      var logoSrc = await getLogoSrc(org);
+      if (logoSrc) {
+        doc.image(logoSrc, pw / 2 - 22.5, y, { fit: [45, 45] });
         y += 60;
       }
     } catch (e) {}
@@ -377,9 +382,9 @@ exports.contrato = async function (req, res) {
 var logoHeight = 0;
 
     try {
-      var logoPath = getLogoPath(org);
-      if (fs.existsSync(logoPath)) {
-        doc.image(logoPath, pw / 2 - 27.5, y, { fit: [55, 55] });
+      var logoSrc = await getLogoSrc(org);
+      if (logoSrc) {
+        doc.image(logoSrc, pw / 2 - 27.5, y, { fit: [55, 55] });
         logoHeight = 76;
       }
     } catch (e) {}
@@ -657,14 +662,14 @@ function getDataAtual() {
   return diaSemana + ", " + dia + " de " + mes + " de " + ano;
 }
 
-function drawWarningHeader(doc, org, y) {
+async function drawWarningHeader(doc, org, y) {
   var ml = 40;
   var w = doc.page.width - 80;
 
   try {
-    var logoPath = getLogoPath(org);
-    if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, doc.page.width / 2 - 27.5, y, { fit: [55, 55] });
+    var logoSrc = await getLogoSrc(org);
+    if (logoSrc) {
+      doc.image(logoSrc, doc.page.width / 2 - 27.5, y, { fit: [55, 55] });
       y += 76;
     }
   } catch (e) {}
@@ -810,7 +815,7 @@ exports.avisoAdvertencia = async function (req, res) {
 
     var y = 50;
 
-    y = drawWarningHeader(doc, org, y);
+    y = await drawWarningHeader(doc, org, y);
 
     // Default description if none provided
     var descricao = req.query.descricao || "Abandono do posto de trabalho.";
@@ -856,9 +861,9 @@ exports.fichaColaborador = async function (req, res) {
     var logoHeight = 0;
 
     try {
-      var logoPath = getLogoPath(org);
-      if (fs.existsSync(logoPath)) {
-        doc.image(logoPath, pw / 2 - 27.5, y, { fit: [55, 55] });
+      var logoSrc = await getLogoSrc(org);
+      if (logoSrc) {
+        doc.image(logoSrc, pw / 2 - 27.5, y, { fit: [55, 55] });
         logoHeight = 76;
       }
     } catch (e) {}
@@ -884,19 +889,10 @@ exports.fichaColaborador = async function (req, res) {
     if (colab.fotografia) {
       try {
         var photoPath = decodeHtmlEntities(colab.fotografia);
-        if (photoPath.startsWith("http")) {
-          var https = require("https");
-          var tempFile = path.join(os.tmpdir(), "sghr_photo_" + Date.now() + ".jpg");
-          await new Promise(function (resolve, reject) {
-            https.get(photoPath, function (response) {
-              var stream = fs.createWriteStream(tempFile);
-              response.pipe(stream);
-              stream.on("finish", function () { stream.close(); resolve(); });
-            }).on("error", reject);
-          });
-          if (fs.existsSync(tempFile)) {
-            doc.image(tempFile, pw - 130, y - 30, { fit: [75, 95] });
-            fs.unlinkSync(tempFile);
+        if (/^https?:\/\//.test(photoPath) || photoPath.indexOf("/api/ficheiros/") !== -1) {
+          var photoBuffer = await lerBufferDeUrl(photoPath);
+          if (photoBuffer && photoBuffer.length) {
+            doc.image(photoBuffer, pw - 130, y - 30, { fit: [75, 95] });
           }
         } else {
           if (photoPath.startsWith("/uploads/")) {
@@ -1028,9 +1024,9 @@ exports.resumoPagamentos = async function (req, res) {
     var y = 42;
 
     try {
-      var logoPath = getLogoPath(org);
-      if (fs.existsSync(logoPath)) {
-        doc.image(logoPath, pw / 2 - 22.5, y, { fit: [45, 45] });
+      var logoSrc = await getLogoSrc(org);
+      if (logoSrc) {
+        doc.image(logoSrc, pw / 2 - 22.5, y, { fit: [45, 45] });
         y += 60;
       }
     } catch (e) {}
