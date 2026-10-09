@@ -1,4 +1,4 @@
-var { Colaborador, Ferias, SolicitacaoFerias, AvaliacaoDesempenho, CicloAvaliacao, PedidoColaborador, RegistoPresenca, Contrato, Pagamento, Tarefa } = require("../models");
+var { Colaborador, Ferias, SolicitacaoFerias, AvaliacaoDesempenho, CicloAvaliacao, PedidoColaborador, RegistoPresenca, Contrato, Pagamento, Tarefa, TarefaAlocacao } = require("../models");
 var { Op, Sequelize } = require("sequelize");
 
 var formatarDataLocal = function (d) {
@@ -173,37 +173,52 @@ var getPortalStats = async function (req, res) {
       });
     });
 
-    // Avaliacoes das tarefas (nota automatica 0-20 gerada ao concluir)
-    var tarefasAvaliadas = await Tarefa.findAll({
+    // Avaliacoes das tarefas: a nota e dada pelo gestor a ESTE colaborador
+    // (uma nota por colaborador, registada na sua atribuicao).
+    var alocacoesAvaliadas = await TarefaAlocacao.findAll({
       where: {
         colaborador_id: colaborador.id,
-        estado: { [Op.in]: ["Concluida", "Validada"] },
         nota: { [Op.ne]: null },
       },
-      attributes: [
-        "id", "titulo", "nota", "classificacao", "prazo", "prazo_hora",
-        "data_conclusao", "atraso_dias", "progresso", "estado",
-      ],
-      order: [["data_conclusao", "DESC"], ["updatedAt", "DESC"]],
+      include: [{
+        model: Tarefa,
+        as: "tarefa",
+        attributes: ["id", "titulo", "prazo", "prazo_hora", "estado"],
+      }],
+      order: [["avaliado_em", "DESC"], ["updatedAt", "DESC"]],
       limit: 8,
     });
 
     var somaNotasTarefas = 0;
     var listaTarefas = [];
-    tarefasAvaliadas.forEach(function (t) {
-      var notaT = parseFloat(t.nota);
+    alocacoesAvaliadas.forEach(function (a) {
+      if (!a.tarefa) return;
+      var notaT = parseFloat(a.nota);
       somaNotasTarefas += notaT;
+      // Atraso = conclusao depois do fim da janela (nao aplicavel ao
+      // progresso automatico, que conclui exactamente no fim da janela).
+      var atrasoDias = 0;
+      if (a.data_conclusao && a.janela_fim &&
+          new Date(a.data_conclusao).getTime() > new Date(a.janela_fim).getTime()) {
+        atrasoDias = Math.ceil(
+          (new Date(a.data_conclusao).getTime() - new Date(a.janela_fim).getTime()) / 86400000
+        );
+      }
       listaTarefas.push({
-        id: t.id,
-        titulo: t.titulo,
+        id: a.id,
+        titulo: a.tarefa.titulo,
         nota: notaT,
-        classificacao: t.classificacao,
-        prazo: t.prazo ? String(t.prazo).slice(0, 10) : null,
-        prazo_hora: t.prazo_hora ? String(t.prazo_hora).slice(0, 5) : null,
-        data_conclusao: t.data_conclusao,
-        atraso_dias: t.atraso_dias || 0,
-        no_prazo: !(t.atraso_dias > 0),
-        estado: t.estado,
+        classificacao: a.classificacao,
+        desempenho: a.desempenho !== null && a.desempenho !== undefined ? parseFloat(a.desempenho) : null,
+        produtividade: a.produtividade !== null && a.produtividade !== undefined ? parseFloat(a.produtividade) : null,
+        cumprimento_prazo: a.cumprimento_prazo !== null && a.cumprimento_prazo !== undefined ? parseFloat(a.cumprimento_prazo) : null,
+        observacoes: a.observacoes,
+        prazo: a.tarefa.prazo ? String(a.tarefa.prazo).slice(0, 10) : null,
+        prazo_hora: a.tarefa.prazo_hora ? String(a.tarefa.prazo_hora).slice(0, 5) : null,
+        data_conclusao: a.data_conclusao,
+        atraso_dias: atrasoDias,
+        no_prazo: !(atrasoDias > 0),
+        estado: a.estado,
       });
     });
     var mediaTarefas = listaTarefas.length > 0

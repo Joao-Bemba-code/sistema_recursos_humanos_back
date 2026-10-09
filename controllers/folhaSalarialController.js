@@ -502,7 +502,7 @@ var createPagamento = async function (req, res) {
       var descontoCreditos = 0;
 
       if (!descontosManuais) {
-        var creditos = await calcularDescontosCreditos(dados.colaborador_id, maxDesconto, { transaction: t });
+        var creditos = await calcularDescontosCreditos(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano), maxDesconto, { transaction: t });
         dados.descontos = creditos.total;
         descontoCreditos = creditos.total;
       }
@@ -768,7 +768,7 @@ var gerarPagamentosAutomaticos = async function (req, res) {
 
       // Desconto automatico de creditos activos (limitado para o liquido nao ficar negativo)
       var maxDesconto = Math.max(0, Math.round((salarioBase + subsidios + horasExtras - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas) * 100) / 100);
-      var creditos = await calcularDescontosCreditos(colab.id, maxDesconto, { transaction: t });
+      var creditos = await calcularDescontosCreditos(colab.id, parseInt(mes), parseInt(ano), maxDesconto, { transaction: t });
       var totalLiquido = Math.round((salarioBase + subsidios + horasExtras - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas - creditos.total) * 100) / 100;
 
       var pagamentoDados = {

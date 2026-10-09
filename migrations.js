@@ -444,6 +444,128 @@ var migrations = async function () {
     await adicionarColuna("tarefas", "atraso_minutos", "INT NOT NULL DEFAULT 0");
     console.log(" Colunas 'prazo_hora'/'atraso_minutos' em tarefas garantidas!");
 
+    // ==================== TAREFAS: indicadores de avaliacao por colaborador ====================
+    // O gestor avalia com tres indicadores (0-20): desempenho, produtividade e
+    // cumprimento do prazo. A nota final e a media dos tres.
+    await adicionarColuna("tarefa_alocacoes", "desempenho", "DECIMAL(4,2) NULL");
+    await adicionarColuna("tarefa_alocacoes", "produtividade", "DECIMAL(4,2) NULL");
+    await adicionarColuna("tarefa_alocacoes", "cumprimento_prazo", "DECIMAL(4,2) NULL");
+    // Backfill idempotente: notas antigas passam a valer nos tres indicadores.
+    try {
+      var resultadoBackfill = await sequelize.query(
+        "UPDATE `tarefa_alocacoes` SET `desempenho` = `nota`, `produtividade` = `nota`, " +
+        "`cumprimento_prazo` = `nota` WHERE `nota` IS NOT NULL AND `desempenho` IS NULL"
+      );
+      var linhasBackfill = Array.isArray(resultadoBackfill) && resultadoBackfill.length > 1
+        ? resultadoBackfill[0] : resultadoBackfill;
+      var afectadas = (linhasBackfill && linhasBackfill.affectedRows) || 0;
+      if (afectadas > 0) console.log(" " + afectadas + " avaliacao(oes) antigas preenchidas nos indicadores!");
+    } catch (eBackfill) {
+      console.log(" Aviso: problema no backfill dos indicadores:", eBackfill.message);
+    }
+    console.log(" Colunas de indicadores de avaliacao garantidas em 'tarefa_alocacoes'!");
+
+    // ==================== TAREFAS: subtarefa por alocacao (o que cada um faz) ====================
+    await adicionarColuna("tarefa_alocacoes", "descricao", "TEXT NULL");
+    console.log(" Coluna 'descricao' garantida em 'tarefa_alocacoes'!");
+
+    // ==================== TAREFAS: estado 'Atrasada' nos ENUMs ====================
+    // Atrasada = janela terminou sem o colaborador concluir. SEM avaliacao
+    // automatica: fica pendente de decisao do gestor (reabrir, eliminar ou
+    // avaliar manualmente, tendo em conta a justificativa do colaborador).
+    try {
+      var enumTarefa = await sequelize.query("SHOW COLUMNS FROM `tarefas` LIKE 'estado'");
+      var linhasEnumT = Array.isArray(enumTarefa[0]) ? enumTarefa[0] : enumTarefa;
+      var tipoEnumT = linhasEnumT.length ? String(linhasEnumT[0].Type || "") : "";
+      if (tipoEnumT && tipoEnumT.indexOf("Atrasada") === -1) {
+        await sequelize.query(
+          "ALTER TABLE `tarefas` MODIFY COLUMN `estado` " +
+          "ENUM('Pendente','Em_curso','Atrasada','Concluida','Validada','Cancelada') " +
+          "NOT NULL DEFAULT 'Pendente'"
+        );
+        console.log(" ENUM 'estado' de tarefas com 'Atrasada' garantido!");
+      }
+
+      var enumAloc = await sequelize.query("SHOW COLUMNS FROM `tarefa_alocacoes` LIKE 'estado'");
+      var linhasEnumA = Array.isArray(enumAloc[0]) ? enumAloc[0] : enumAloc;
+      var tipoEnumA = linhasEnumA.length ? String(linhasEnumA[0].Type || "") : "";
+      if (tipoEnumA && tipoEnumA.indexOf("Atrasada") === -1) {
+        await sequelize.query(
+          "ALTER TABLE `tarefa_alocacoes` MODIFY COLUMN `estado` " +
+          "ENUM('Pendente','Em_curso','Reaberta','Justificativa','Atrasada','Concluida','Validada','Cancelada') " +
+          "NOT NULL DEFAULT 'Pendente'"
+        );
+        console.log(" ENUM 'estado' de tarefa_alocacoes com 'Atrasada' garantido!");
+      }
+    } catch (eEnumT) {
+      console.log(" Aviso: problema ao actualizar ENUMs de tarefas:", eEnumT.message);
+    }
+
+    // ==================== TAREFAS: alocacoes para os dados existentes ====================
+    // O novo modelo guarda cada colaborador com a sua propria janela e
+    // avaliacao em 'tarefa_alocacoes'. As tarefas antigas (1 colaborador por
+    // tarefa) recebem uma alocacao equivalente - idempotente.
+    try {
+      var modelosTarefa = require("./models");
+      var tarefasLegado = await modelosTarefa.Tarefa.findAll();
+      var migradas = 0;
+      for (var iTarefa = 0; iTarefa < tarefasLegado.length; iTarefa++) {
+        var tarefaLegado = tarefasLegado[iTarefa];
+        var totalAloc = await modelosTarefa.TarefaAlocacao.count({
+          where: { tarefa_id: tarefaLegado.id },
+        });
+        if (totalAloc > 0) continue;
+
+        var inicioJanela = tarefaLegado.data_inicio
+          ? new Date(tarefaLegado.data_inicio)
+          : new Date(tarefaLegado.createdAt);
+        var fimJanela = null;
+        if (tarefaLegado.prazo) {
+          var partesPrazo = String(tarefaLegado.prazo).slice(0, 10).split("-");
+          var horaPrazo = tarefaLegado.prazo_hora
+            ? String(tarefaLegado.prazo_hora).slice(0, 5).split(":")
+            : ["23", "59"];
+          fimJanela = new Date(
+            Number(partesPrazo[0]), Number(partesPrazo[1]) - 1, Number(partesPrazo[2]),
+            Number(horaPrazo[0]) || 0, Number(horaPrazo[1]) || 0, 0, 0
+          );
+        }
+        if (!fimJanela || fimJanela.getTime() <= inicioJanela.getTime()) {
+          fimJanela = new Date(inicioJanela.getTime() + 24 * 60 * 60 * 1000);
+        }
+
+        var estadoLegado = tarefaLegado.estado || "Pendente";
+        var concluidaLegado = estadoLegado === "Concluida" || estadoLegado === "Validada";
+        var conclusaoLegado = tarefaLegado.data_conclusao
+          ? new Date(tarefaLegado.data_conclusao)
+          : (concluidaLegado ? fimJanela : null);
+
+        await modelosTarefa.TarefaAlocacao.create({
+          organizacao_id: tarefaLegado.organizacao_id,
+          tarefa_id: tarefaLegado.id,
+          colaborador_id: tarefaLegado.colaborador_id,
+          atribuido_por: tarefaLegado.atribuido_por,
+          estado: estadoLegado,
+          janela_inicio: inicioJanela,
+          janela_fim: fimJanela,
+          data_inicio: tarefaLegado.data_inicio ? new Date(tarefaLegado.data_inicio) : (estadoLegado === "Pendente" ? null : inicioJanela),
+          data_conclusao: conclusaoLegado,
+          progresso: concluidaLegado ? 100 : (tarefaLegado.progresso || 0),
+          nota: tarefaLegado.nota !== null && tarefaLegado.nota !== undefined ? tarefaLegado.nota : null,
+          classificacao: tarefaLegado.classificacao || null,
+          observacoes: tarefaLegado.validacao_observacoes || null,
+          avaliado_por: estadoLegado === "Validada" ? tarefaLegado.atribuido_por : null,
+          avaliado_em: estadoLegado === "Validada" ? new Date(tarefaLegado.updatedAt) : null,
+        });
+        migradas++;
+      }
+      if (migradas > 0) {
+        console.log(" " + migradas + " tarefa(s) antigas migrada(s) para 'tarefa_alocacoes'!");
+      }
+    } catch (eAlocacoes) {
+      console.log(" Aviso: problema ao migrar tarefas para alocacoes:", eAlocacoes.message);
+    }
+
     console.log(" Migracoes concluidas com sucesso!");
   } catch (e) {
     console.log(" Erro nas migracoes:", e.message);

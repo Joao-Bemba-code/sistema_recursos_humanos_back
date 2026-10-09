@@ -12,6 +12,7 @@ router.get("/:id", requireLevel(4), controller.getCredito);
 router.post("/", requireLevel(4), controller.createCredito);
 router.put("/:id", requireLevel(4), controller.updateCredito);
 router.post("/:id/cancelar", requireLevel(4), controller.cancelarCredito);
+router.post("/:id/regularizar", requireLevel(4), controller.regularizarMes);
 router.delete("/:id", requireLevel(4), controller.removeCredito);
 
 module.exports = router;

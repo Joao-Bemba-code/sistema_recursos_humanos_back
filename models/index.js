@@ -24,7 +24,7 @@ var { ComunicacaoAnexo } = require("./ComunicacaoAnexo");
 var Notificacao = require("./Notificacao");
 var PedidoColaborador = require("./PedidoColaborador");
 var Ficheiro = require("./Ficheiro");
-var { Tarefa, TarefaEvento } = require("./Tarefa");
+var { Tarefa, TarefaEvento, TarefaAlocacao } = require("./Tarefa");
 var LogAuditoria = require("./LogAuditoria");
 
 // Organizacao -> Utilizadores
@@ -212,6 +212,14 @@ Tarefa.belongsTo(Utilizador, { foreignKey: "atribuido_por", as: "atribuidor", co
 Tarefa.hasMany(TarefaEvento, { foreignKey: "tarefa_id", as: "eventos", constraints: false });
 TarefaEvento.belongsTo(Tarefa, { foreignKey: "tarefa_id", as: "tarefa", constraints: false });
 TarefaEvento.belongsTo(Utilizador, { foreignKey: "utilizador_id", as: "utilizador", constraints: false });
+
+// Cada colaborador atribuido tem a sua propria janela e avaliacao
+Tarefa.hasMany(TarefaAlocacao, { foreignKey: "tarefa_id", as: "alocacoes", constraints: false });
+TarefaAlocacao.belongsTo(Tarefa, { foreignKey: "tarefa_id", as: "tarefa", constraints: false });
+TarefaAlocacao.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador", constraints: false });
+Colaborador.hasMany(TarefaAlocacao, { foreignKey: "colaborador_id", as: "alocacoes", constraints: false });
+TarefaAlocacao.belongsTo(Utilizador, { foreignKey: "atribuido_por", as: "atribuidor", constraints: false });
+TarefaAlocacao.belongsTo(Utilizador, { foreignKey: "avaliado_por", as: "avaliador", constraints: false });
 
 // Departamento -> Departamento (hierarquia)
 Departamento.belongsTo(Departamento, { foreignKey: "departamento_pai_id", as: "pai" });
@@ -556,5 +564,6 @@ module.exports = {
   Ficheiro,
   Tarefa,
   TarefaEvento,
+  TarefaAlocacao,
   LogAuditoria,
 };

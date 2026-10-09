@@ -150,11 +150,13 @@ var listAvaliacoes = async function (req, res) {
     var estado = req.query.estado;
     var ciclo_id = req.query.ciclo_id;
     var colaborador_id = req.query.colaborador_id;
+    var classificacao = req.query.classificacao;
 
     var where = {};
     if (estado) where.estado = estado;
     if (ciclo_id) where.ciclo_id = ciclo_id;
     if (colaborador_id) where.colaborador_id = colaborador_id;
+    if (classificacao) where.classificacao = classificacao;
 
     var include = [
       { model: CicloAvaliacao, as: "ciclo", attributes: ["id", "nome", "data_inicio", "data_fim"] },

@@ -36,10 +36,13 @@ var list = async function (req, res) {
       where.activo = estado === "true" || estado === "1";
     }
 
-    // Filtro "Bloqueados": contas travadas por tentativas falhadas de login
+    // Filtro "Bloqueados": contas travadas por tentativas falhadas de login.
+    // Uma conta bloqueada continua activa (activo=true), por isso o filtro de
+    // estado enviado pelo frontend ("estado=false") nao deve ser aplicado aqui.
     var filtrarBloqueados = req.query.bloqueados;
     if (filtrarBloqueados === "1" || filtrarBloqueados === "true") {
       where.bloqueado = true;
+      if (where.activo === false) delete where.activo;
     }
 
     var rows = await Utilizador.findAll({
