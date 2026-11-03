@@ -252,6 +252,14 @@ var dataLocal = function (d) {
   return y + "-" + m + "-" + dia;
 };
 
+// Inicio da janela de assiduidade: dia 1 do mes anterior. O sistema mantem
+// completo o mes actual E o anterior (presencas, atrasos e faltas), para um
+// mes nunca ficar a meio quando a ponte esteve parada ou o mes virou.
+var inicioJanelaAssiduidade = function (hoje) {
+  var h = hoje || new Date();
+  return dataLocal(new Date(h.getFullYear(), h.getMonth() - 1, 1));
+};
+
 // Chave "id|data" para comparar dias (aceita Date ou "YYYY-MM-DD" do DATEONLY)
 var chaveDia = function (id, data) {
   return id + "|" + (dataLocal(data) || String(data));
@@ -312,19 +320,31 @@ var sincronizar = async function (req, res) {
       }
     }
 
+    // Janela de assiduidade: do dia 1 do mes anterior ate hoje. Assim o mes
+    // que acabou de virar fica completo (presencas e faltas) mesmo quando a
+    // ponte esteve parada ou picagens antigas so chegaram agora.
+    var janelaDesde = inicioJanelaAssiduidade();
+
     // Lote vazio: a ponte so quer que o servidor reclassifique os estados
     // (tolerancia de entrada / "Em curso" do dia de hoje), sem picagens novas.
+    // Alem da reclassificacao, preenche os "Ausente" em falta na janela.
     if (novas === 0) {
-      var resultadoReclass = await reclassificarAutomaticos();
+      var resultadoReclass = await reclassificarAutomaticos(janelaDesde);
+      var colabsReclass = await Colaborador.findAll({
+        where: { id_biometrico: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] } },
+        attributes: ["id", "nome_completo", "numero_colaborador", "id_biometrico", "estado", "data_admissao", "data_desligamento", "dias_descanso"],
+      });
+      var mapaEscalasReclass = await carregarMapaEscalas(colabsReclass);
+      var ausentesReclass = await marcarAusentesAutomaticos(colabsReclass, mapaEscalasReclass, janelaDesde);
       return res.status(200).json({
         mensagem: "Nenhuma picagem nova",
         recebidas: recebidas,
         novas: 0,
         duplicadas: duplicadas,
         sem_mapeamento: 0,
-        registos_criados: 0,
+        registos_criados: resultadoReclass.criados,
         registos_actualizados: 0,
-        ausentes_criados: 0,
+        ausentes_criados: ausentesReclass,
         reclassificados: resultadoReclass.actualizados,
         ausentes_removidos: resultadoReclass.removidos,
         versao_algoritmo: VERSAO_ALGORITMO,
@@ -460,12 +480,11 @@ var sincronizar = async function (req, res) {
 
     // 4) "Ausente" automatico: colaboradores mapeados, activos, dias de trabalho
     // (segundo a escala/descanso de cada um) sem nenhuma picagem e sem registo
-    var ausentesCriados = await marcarAusentesAutomaticos(colaboradores, mapaEscalas);
+    var ausentesCriados = await marcarAusentesAutomaticos(colaboradores, mapaEscalas, janelaDesde);
 
-    // 5) Reclassificar os registos do mes corrente (tolerancia / "Em curso").
-    // Correge tambem registos que ficaram com estado antigo porque nao houve
-    // picagens novas (ex.: registos de hoje que ainda nao tem hora de saida).
-    var resultadoReclass = await reclassificarAutomaticos();
+    // 5) Reclassificar os registos da janela (tolerancia / "Em curso") e criar
+    // os registos em falta a partir de picagens ja gravadas.
+    var resultadoReclass = await reclassificarAutomaticos(janelaDesde);
 
     return res.status(200).json({
       mensagem: "Picagens sincronizadas",
@@ -486,54 +505,56 @@ var sincronizar = async function (req, res) {
   }
 };
 
-// Cria o registo "Ausente" (metodo Biometrico) para TODOS os dias do mes actual
-// (do dia 1 ate hoje) em que o colaborador deveria trabalhar (segundo a escala
-// semanal ou o dias_descanso) e nao tem picagem nem registo de presenca.
+// Cria o registo "Ausente" (metodo Biometrico) para TODOS os dias da janela
+// (por omissao do dia 1 do mes actual ate hoje) em que o colaborador deveria
+// trabalhar (segundo a escala semanal ou o dias_descanso) e nao tem picagem nem
+// registo de presenca. O sincronizador passa a janela desde o dia 1 do mes
+// anterior, para o mes que virou nao ficar com faltas por preencher.
 // Ficam de fora: os dias de descanso e os feriados. Quem esta escalado para
 // trabalhar ao sabado e marcado Ausente se nao picar.
 // No DIA DE HOJE so marca depois de passar a hora esperada + tolerancia (para
 // nao aparecer "Ausente" a quem ainda nem chegou o turno — sobretudo turnos
 // nocturnos, que comecam as 20:00).
-// A assiduidade so conta a partir do dia 1 do mes. Registo corrigido a mao
-// pelo RH conta como existente e nunca e mexido.
-var marcarAusentesAutomaticos = async function (colaboradores, mapaEscalas) {
+// Registo corrigido a mao pelo RH conta como existente e nunca e mexido.
+var marcarAusentesAutomaticos = async function (colaboradores, mapaEscalas, desdeStr) {
   if (!colaboradores || colaboradores.length === 0) return 0;
 
   var hoje = new Date();
   var hojeStr = dataLocal(hoje);
   var agoraMinutos = hoje.getHours() * 60 + hoje.getMinutes();
 
-  var diasMes = [];
-  var dia = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  var desde = desdeStr || dataLocal(new Date(hoje.getFullYear(), hoje.getMonth(), 1));
+  var diasJanela = [];
+  var dia = new Date(desde + "T00:00:00");
   while (dia <= hoje) {
-    diasMes.push(dataLocal(dia));
+    diasJanela.push(dataLocal(dia));
     dia.setDate(dia.getDate() + 1);
   }
-  if (diasMes.length === 0) return 0;
+  if (diasJanela.length === 0) return 0;
 
-  var inicioMes = diasMes[0];
-  var fimMes = diasMes[diasMes.length - 1];
+  var inicioJanela = diasJanela[0];
+  var fimJanela = diasJanela[diasJanela.length - 1];
 
   if (!mapaEscalas) {
     mapaEscalas = await carregarMapaEscalas(colaboradores);
   }
 
-  // Feriados do mes: ninguem e marcado Ausente num feriado
+  // Feriados da janela: ninguem e marcado Ausente num feriado
   var feriados = await Feriado.findAll({
     attributes: ["data"],
-    where: { data: { [Op.gte]: inicioMes, [Op.lte]: fimMes } },
+    where: { data: { [Op.gte]: inicioJanela, [Op.lte]: fimJanela } },
   });
   var datasFeriado = {};
   for (var f = 0; f < feriados.length; f++) {
     datasFeriado[dataLocal(feriados[f].data)] = true;
   }
 
-  // 1) Uma consulta: picagens do mes (para saber quem passou o dedo)
+  // 1) Uma consulta: picagens da janela (para saber quem passou o dedo)
   var picagensMes = await PicagemBiometrico.findAll({
     attributes: ["id_biometrico", "data_hora"],
     where: {
       id_biometrico: { [Op.in]: colaboradores.map(function (c) { return c.id_biometrico; }) },
-      data_hora: { [Op.gte]: new Date(inicioMes + "T00:00:00"), [Op.lte]: new Date(fimMes + "T23:59:59") },
+      data_hora: { [Op.gte]: new Date(inicioJanela + "T00:00:00"), [Op.lte]: new Date(fimJanela + "T23:59:59") },
     },
   });
   var comPicagem = {};
@@ -541,12 +562,12 @@ var marcarAusentesAutomaticos = async function (colaboradores, mapaEscalas) {
     comPicagem[chaveDia(picagensMes[p].id_biometrico, picagensMes[p].data_hora)] = true;
   }
 
-  // 2) Uma consulta: registos de presenca ja existentes no mes
+  // 2) Uma consulta: registos de presenca ja existentes na janela
   var registosMes = await RegistoPresenca.findAll({
     attributes: ["colaborador_id", "data"],
     where: {
       colaborador_id: { [Op.in]: colaboradores.map(function (c) { return c.id; }) },
-      data: { [Op.between]: [inicioMes, fimMes] },
+      data: { [Op.between]: [inicioJanela, fimJanela] },
     },
   });
   var comRegisto = {};
@@ -563,8 +584,8 @@ var marcarAusentesAutomaticos = async function (colaboradores, mapaEscalas) {
     var admissao = colab.data_admissao ? dataLocal(colab.data_admissao) : null;
     var desligamento = colab.data_desligamento ? dataLocal(colab.data_desligamento) : null;
 
-    for (var j = 0; j < diasMes.length; j++) {
-      var dataStr = diasMes[j];
+    for (var j = 0; j < diasJanela.length; j++) {
+      var dataStr = diasJanela[j];
       // Nao marcar antes da admissao nem depois do desligamento
       if (admissao && dataStr < admissao) continue;
       if (desligamento && dataStr > desligamento) continue;
@@ -607,66 +628,67 @@ var marcarAusentesAutomaticos = async function (colaboradores, mapaEscalas) {
   return criados;
 };
 
-// Recalcula o estado dos registos biometricos do mes corrente, para reflectir
-// a tolerancia de entrada, as escalas/turnos de cada colaborador e o estado
-// provisorio "Em curso" do dia de hoje. Tambem recupera as horas de saida dos
-// turnos nocturnos (a picagem de saida chega de madrugada, no dia seguinte).
+// Recalcula o estado dos registos biometricos dentro da janela (por omissao o
+// mes actual) para reflectir a tolerancia de entrada, as escalas/turnos de cada
+// colaborador e o estado provisorio "Em curso" do dia de hoje. Tambem recupera
+// as horas de saida dos turnos nocturnos (a picagem de saida chega de madrugada,
+// no dia seguinte). Dias com picagens mas SEM registo de presenca sao criados
+// aqui (ex.: picagens que chegaram quando a API antiga nao as processou).
 // Correccoes do RH (ajustado_manual, metodo Manual) e estados manuals como
 // Licenca/Ferias/Fim_semana nunca sao tocados.
-var reclassificarAutomaticos = async function () {
+var reclassificarAutomaticos = async function (desdeStr) {
   var hoje = new Date();
-  var inicioMes = dataLocal(new Date(hoje.getFullYear(), hoje.getMonth(), 1));
-  var inicioMesSql = inicioMes + "T00:00:00";
+  var desde = desdeStr || dataLocal(new Date(hoje.getFullYear(), hoje.getMonth(), 1));
+  var desdeSql = desde + "T00:00:00";
+
+  // Colaboradores mapeados no biometro (para escalas e criacao de registos)
+  var cols = await Colaborador.findAll({
+    attributes: ["id", "dias_descanso", "id_biometrico", "estado", "data_admissao", "data_desligamento"],
+    where: { id_biometrico: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] } },
+  });
+  var colabById = {};
+  var idsBio = [];
+  for (var ci = 0; ci < cols.length; ci++) {
+    colabById[cols[ci].id] = cols[ci];
+    idsBio.push(cols[ci].id_biometrico);
+  }
+  var colabIdPorBio = {};
+  for (var cm = 0; cm < cols.length; cm++) {
+    colabIdPorBio[String(cols[cm].id_biometrico).trim()] = cols[cm].id;
+  }
+  var mapaEscalas = await carregarMapaEscalas(cols);
 
   var registos = await RegistoPresenca.findAll({
     attributes: ["id", "colaborador_id", "data", "hora_entrada", "hora_saida", "horas_trabalhadas", "estado", "observacoes", "processada"],
     where: {
       metodo: "Biometrico",
       ajustado_manual: { [Op.or]: [false, null] },
-      data: { [Op.gte]: inicioMes },
+      data: { [Op.gte]: desde },
     },
   });
 
-  // Colaboradores envolvidos (para escalas e para a limpeza final)
-  var idsColabs = {};
-  registos.forEach(function (r) { idsColabs[r.colaborador_id] = true; });
-  var listaIds = Object.keys(idsColabs);
-  var colabById = {};
-  var mapaEscalas = {};
-  if (listaIds.length > 0) {
-    var cols = await Colaborador.findAll({
-      attributes: ["id", "dias_descanso"],
-      where: { id: { [Op.in]: listaIds } },
-    });
-    for (var ci = 0; ci < cols.length; ci++) {
-      colabById[cols[ci].id] = cols[ci];
-    }
-    mapaEscalas = await carregarMapaEscalas(cols);
-  }
-
-  // 1) Recalcular entrada/saida a partir de TODAS as picagens ja gravadas.
-  // Isto recupera as horas de saida que ficaram em falta (a picagem de saida
-  // chegou sozinha num lote e, antes, era descartada) e as saidas de turnos
-  // nocturnos (picagem de madrugada do dia seguinte).
+  // Picagens da janela inteira (o aparelho pode estar num fuso diferente do
+  // servidor, por isso o limite superior e o fim do dia corrente).
+  // As picagens sao gravadas com a hora "de parede" do aparelho, portanto uma
+  // picagem das 16:18 em Luanda fica como 16:18 UTC no servidor, ate ~1h no
+  // futuro. Por isso o limite superior NAO pode ser "agora" (isso descartava
+  // as picagens da tarde, e era por isso que as horas de saida nunca eram
+  // reconstruidas). Usa-se o fim do dia corrente.
+  var fimDoDia = new Date(dataLocal(hoje) + "T23:59:59.999");
   var picagensPorDia = {};
-  if (listaIds.length > 0) {
-    // O aparelho pode estar num fuso horario diferente do servidor (Luanda = UTC+1).
-    // As picagens sao gravadas com a hora "de parede" do aparelho, portanto uma
-    // picagem das 16:18 em Luanda fica como 16:18 UTC no servidor, ate ~1h no
-    // futuro. Por isso o limite superior NAO pode ser "agora" (isso descartava
-    // as picagens da tarde, e era por isso que as horas de saida nunca eram
-    // reconstruidas). Usa-se o fim do dia corrente.
-    var fimDoDia = new Date(dataLocal(hoje) + "T23:59:59.999");
+  if (idsBio.length > 0) {
     var picagens = await PicagemBiometrico.findAll({
-      attributes: ["colaborador_id", "data_hora", "tipo"],
+      attributes: ["id_biometrico", "data_hora", "tipo"],
       where: {
-        colaborador_id: { [Op.in]: listaIds },
-        data_hora: { [Op.gte]: new Date(inicioMesSql), [Op.lte]: fimDoDia },
+        id_biometrico: { [Op.in]: idsBio },
+        data_hora: { [Op.gte]: new Date(desdeSql), [Op.lte]: fimDoDia },
       },
       order: [["data_hora", "ASC"]],
     });
     picagens.forEach(function (p) {
-      var chave = p.colaborador_id + "|" + dataLocal(p.data_hora);
+      var colabId = colabIdPorBio[String(p.id_biometrico).trim()];
+      if (!colabId) return;
+      var chave = colabId + "|" + dataLocal(p.data_hora);
       if (!picagensPorDia[chave]) picagensPorDia[chave] = [];
       picagensPorDia[chave].push({
         hora: horaLocal(p.data_hora),
@@ -677,7 +699,63 @@ var reclassificarAutomaticos = async function () {
     });
   }
 
-  // 2) Aplicar entrada/saida + estado + observacao
+  var registosPorDia = {};
+  registos.forEach(function (r) {
+    registosPorDia[r.colaborador_id + "|" + dataLocal(r.data)] = r;
+  });
+
+  // 1) Criar os registos em falta: dia com picagens e sem registo nenhum.
+  // Sem entrada valida a picagem e' ruido (ex.: saida de turno nocturno) — nao
+  // cria registo falso.
+  var criados = 0;
+  var chavesPicagens = Object.keys(picagensPorDia);
+  for (var ck = 0; ck < chavesPicagens.length; ck++) {
+    var chave = chavesPicagens[ck];
+    if (registosPorDia[chave]) continue;
+    var partesChave = chave.split("|");
+    var colabId = parseInt(partesChave[0], 10);
+    var dataStr = partesChave.slice(1).join("|");
+    var colab = colabById[colabId];
+    if (!colab) continue;
+
+    var diaSemana = new Date(dataStr + "T00:00:00").getDay();
+    var escala = escalaDoDia(colab, mapaEscalas, diaSemana);
+    var lista = picagensPorDia[chave];
+    if (turnoNocturno(escala)) {
+      var dSeguinte = new Date(dataStr + "T00:00:00");
+      dSeguinte.setDate(dSeguinte.getDate() + 1);
+      var picagensSeguinte = picagensPorDia[colabId + "|" + dataLocal(dSeguinte)] || [];
+      for (var ps2 = 0; ps2 < picagensSeguinte.length; ps2++) {
+        if (paraMinutos(picagensSeguinte[ps2].hora) !== null && paraMinutos(picagensSeguinte[ps2].hora) < 12 * 60) {
+          lista.push(picagensSeguinte[ps2]);
+        }
+      }
+    }
+
+    var horariosNovos = atribuirHorarios(null, null, lista, escala, dataStr);
+    if (!horariosNovos.entrada) continue;
+
+    try {
+      await RegistoPresenca.create({
+        colaborador_id: colabId,
+        data: dataStr,
+        hora_entrada: horariosNovos.entrada,
+        hora_saida: horariosNovos.saida,
+        horas_trabalhadas: calcularHorasTrabalhadas(horariosNovos.entrada, horariosNovos.saida),
+        horas_extras: 0,
+        estado: classificarEstado(horariosNovos.entrada, !!horariosNovos.saida, dataStr, escala),
+        metodo: "Biometrico",
+        observacoes: observacaoAutomatica(horariosNovos.entrada, !!horariosNovos.saida, dataStr, escala),
+      });
+      criados++;
+    } catch (e) {
+      if (e.name !== "SequelizeUniqueConstraintError") {
+        console.log("Erro ao criar registo em falta na reclassificacao:", e.message);
+      }
+    }
+  }
+
+  // 2) Aplicar entrada/saida + estado + observacao nos registos existentes
   var actualizados = 0;
   for (var r = 0; r < registos.length; r++) {
     var registo = registos[r];
@@ -751,12 +829,6 @@ var reclassificarAutomaticos = async function () {
   for (var ft = 0; ft < feriadosTodos.length; ft++) {
     datasFeriadoTodos[dataLocal(feriadosTodos[ft].data)] = true;
   }
-  var colsTodos = await Colaborador.findAll({ attributes: ["id", "dias_descanso"] });
-  var colabTodosById = {};
-  for (var cdd = 0; cdd < colsTodos.length; cdd++) {
-    colabTodosById[colsTodos[cdd].id] = colsTodos[cdd];
-  }
-  var mapaEscalasTodos = await carregarMapaEscalas(colsTodos);
 
   for (var r2 = 0; r2 < registos.length; r2++) {
     var reg = registos[r2];
@@ -767,17 +839,17 @@ var reclassificarAutomaticos = async function () {
       removidos++;
       continue;
     }
-    var colabReg2 = colabTodosById[reg.colaborador_id];
+    var colabReg2 = colabById[reg.colaborador_id];
     if (colabReg2) {
       var diaSemanaReg2 = new Date(dataReg + "T00:00:00").getDay();
-      if (!escalaDoDia(colabReg2, mapaEscalasTodos, diaSemanaReg2)) {
+      if (!escalaDoDia(colabReg2, mapaEscalas, diaSemanaReg2)) {
         await reg.destroy();
         removidos++;
       }
     }
   }
 
-  return { actualizados: actualizados, removidos: removidos };
+  return { actualizados: actualizados, removidos: removidos, criados: criados };
 };
 
 // Lista colaboradores com mapeamento biometrico (para a ponte e para o admin)
