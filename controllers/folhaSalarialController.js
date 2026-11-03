@@ -22,6 +22,22 @@ var TABELA_IRT = [
 
 var arredondar = function (v) { return Math.round(v * 100) / 100; };
 
+// Limite de entrada para o desconto de atrasos (iguais aos do biometro):
+// entrada ate 08:00 + tolerancia (15 min por omissao, ou seja 08:15) nao
+// desconta nada; depois disso desconta-se o atraso minuto a minuto.
+var HORARIO_ENTRADA_PADRAO = (process.env.HORARIO_ENTRADA || "08:00").slice(0, 5);
+var TOLERANCIA_ATRASO_MINUTOS = parseInt(process.env.TOLERANCIA_ENTRADA || "15", 10);
+if (isNaN(TOLERANCIA_ATRASO_MINUTOS) || TOLERANCIA_ATRASO_MINUTOS < 0) TOLERANCIA_ATRASO_MINUTOS = 15;
+
+var paraMinutos = function (hora) {
+  if (!hora) return null;
+  var partes = String(hora).split(":");
+  var h = parseInt(partes[0], 10);
+  var m = parseInt(partes[1], 10);
+  if (isNaN(h) || isNaN(m)) return null;
+  return h * 60 + m;
+};
+
 var calcularSegurancaSocial = function (bruto) {
   return arredondar(bruto * TAXA_SEGURANCA_SOCIAL);
 };
@@ -156,7 +172,21 @@ var formatarDataLocal = function (d) {
 // do processamento (sem limite de data). Se pagamentoId for passado
 // (actualizacao/recalculo), as faltas ja processadas por ESSE pagamento
 // tambem contam.
+// Devolve { total, horas_falta, minutos_atraso, valor_hora, valor_minuto,
+//           valor_segundo, valor_milissegundo }:
+//   - "Ausente"  -> desconta 8 horas por dia
+//   - "Atrasado" -> desconta os minutos depois do limite de entrada
+//                   (08:15 por omissao), minuto a minuto, pelo valor da hora
 var calcularDescontoFaltas = async function (colaborador_id, mes, ano, pagamentoId, apenasMes) {
+  var resultado = {
+    total: 0,
+    horas_falta: 0,
+    minutos_atraso: 0,
+    valor_hora: 0,
+    valor_minuto: 0,
+    valor_segundo: 0,
+    valor_milissegundo: 0,
+  };
   try {
     var where = {
       colaborador_id: colaborador_id,
@@ -183,7 +213,7 @@ var calcularDescontoFaltas = async function (colaborador_id, mes, ano, pagamento
       attributes: ["id", "data", "estado", "hora_entrada"],
     });
 
-    if (faltas.length === 0) return 0;
+    if (faltas.length === 0) return resultado;
 
     var vencResult = await sequelize.query(
       "SELECT salario_base FROM contratos WHERE colaborador_id = ? AND estado = 'Activo' LIMIT 1",
@@ -197,22 +227,41 @@ var calcularDescontoFaltas = async function (colaborador_id, mes, ano, pagamento
       );
     }
 
-    if (!vencResult || vencResult.length === 0) return 0;
+    if (!vencResult || vencResult.length === 0) return resultado;
 
     var salarioDiario = parseFloat(vencResult[0].salario_base) / 30;
-    var salarioHora = salarioDiario / 8;
+    var valorHora = salarioDiario / 8;
+    var valorMinuto = valorHora / 60;
+    var valorSegundo = valorMinuto / 60;
+    var valorMilissegundo = valorSegundo / 1000;
+
+    resultado.valor_hora = arredondar(valorHora);
+    resultado.valor_minuto = arredondar(valorMinuto);
+    resultado.valor_segundo = Math.round(valorSegundo * 10000) / 10000;
+    resultado.valor_milissegundo = Math.round(valorMilissegundo * 1000000) / 1000000;
+
+    var limiteEntrada = paraMinutos(HORARIO_ENTRADA_PADRAO) + TOLERANCIA_ATRASO_MINUTOS;
     var horasDescontar = 0;
+    var minutosAtraso = 0;
 
     faltas.forEach(function (f) {
       if (f.estado === "Ausente") {
         horasDescontar += 8;
+      } else if (f.estado === "Atrasado") {
+        var minutosEntrada = paraMinutos(f.hora_entrada);
+        if (minutosEntrada !== null && minutosEntrada > limiteEntrada) {
+          minutosAtraso += minutosEntrada - limiteEntrada;
+        }
       }
     });
 
-    return Math.round(horasDescontar * salarioHora * 100) / 100;
+    resultado.horas_falta = horasDescontar;
+    resultado.minutos_atraso = minutosAtraso;
+    resultado.total = arredondar(horasDescontar * valorHora + minutosAtraso * valorMinuto);
+    return resultado;
   } catch (e) {
     console.log("Erro ao calcular desconto de faltas:", e.message);
-    return 0;
+    return resultado;
   }
 };
 
@@ -493,9 +542,9 @@ var createPagamento = async function (req, res) {
 
     var apenasMes = dados.apenas_mes === true || dados.apenas_mes === "true" || dados.apenas_mes === 1 || dados.apenas_mes === "1";
     var descontoFaltas = await calcularDescontoFaltas(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano), null, apenasMes);
-    dados.desconto_faltas = descontoFaltas;
+    dados.desconto_faltas = descontoFaltas.total;
 
-    var maxDesconto = Math.max(0, Math.round((dados.salario_base + dados.subsidios + dados.horas_extras - dados.irt - dados.seguranca_social - descontoFaltas) * 100) / 100);
+    var maxDesconto = Math.max(0, Math.round((dados.salario_base + dados.subsidios + dados.horas_extras - dados.irt - dados.seguranca_social - descontoFaltas.total) * 100) / 100);
 
     var t = await sequelize.transaction();
     try {
@@ -507,7 +556,7 @@ var createPagamento = async function (req, res) {
         descontoCreditos = creditos.total;
       }
 
-      dados.total_liquido = Math.round((dados.salario_base + dados.subsidios + dados.horas_extras - dados.descontos - dados.irt - dados.seguranca_social - descontoFaltas) * 100) / 100;
+      dados.total_liquido = Math.round((dados.salario_base + dados.subsidios + dados.horas_extras - dados.descontos - dados.irt - dados.seguranca_social - descontoFaltas.total) * 100) / 100;
 
       var pagamento = await Pagamento.create(dados, { transaction: t });
 
@@ -569,9 +618,9 @@ var updatePagamento = async function (req, res) {
     var mesAtual = dadosActualizar.mes !== undefined ? parseInt(dadosActualizar.mes) : pagamento.mes;
     var anoAtual = dadosActualizar.ano !== undefined ? parseInt(dadosActualizar.ano) : pagamento.ano;
     var descontoFaltas = await calcularDescontoFaltas(colId, mesAtual, anoAtual, pagamento.id);
-    dadosActualizar.desconto_faltas = descontoFaltas;
+    dadosActualizar.desconto_faltas = descontoFaltas.total;
 
-    dadosActualizar.total_liquido = Math.round((sb + sub + he - desc - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas) * 100) / 100;
+    dadosActualizar.total_liquido = Math.round((sb + sub + he - desc - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas.total) * 100) / 100;
 
     await pagamento.update(dadosActualizar);
 
@@ -608,10 +657,10 @@ var recalcularFaltas = async function (req, res) {
     var desc = parseFloat(pagamento.descontos) || 0;
     var irt = parseFloat(pagamento.irt) || 0;
     var ss = parseFloat(pagamento.seguranca_social) || 0;
-    var totalLiquido = Math.round((sb + sub + he - desc - irt - ss - descontoFaltas) * 100) / 100;
+    var totalLiquido = Math.round((sb + sub + he - desc - irt - ss - descontoFaltas.total) * 100) / 100;
 
     await pagamento.update({
-      desconto_faltas: descontoFaltas,
+      desconto_faltas: descontoFaltas.total,
       total_liquido: totalLiquido,
     });
 
@@ -729,6 +778,18 @@ var gerarPagamentosAutomaticos = async function (req, res) {
 
     var toNum = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; };
 
+    // Horas extras por colaborador (opcional): [{ colaborador_id, valor }].
+    // So os colaboradores indicados recebem horas extras; os restantes ficam a 0.
+    var extrasPorColaborador = {};
+    var listaExtras = req.body.horas_extras_colaboradores;
+    if (Array.isArray(listaExtras)) {
+      listaExtras.forEach(function (item) {
+        var id = item && item.colaborador_id;
+        var valor = toNum(item && item.valor);
+        if (id && valor > 0) extrasPorColaborador[String(id)] = valor;
+      });
+    }
+
     var criados = [];
     var ignorados = [];
     var erros = [];
@@ -760,16 +821,16 @@ var gerarPagamentosAutomaticos = async function (req, res) {
 
       var salarioBase = toNum(contrato.salario_base);
       var subsidios = toNum(contrato.subsidio_alimentacao);
-      // Horas extras: calculo automatico desactivado — fica a 0, preenchimento manual depois
-      var horasExtras = 0;
+      // Horas extras: valor indicado no pedido para este colaborador (ou 0)
+      var horasExtras = extrasPorColaborador[String(colab.id)] || 0;
 
       var obrigatorios = calcularDescontosObrigatorios(salarioBase, subsidios, horasExtras, await temSegurancaSocial(colab.id));
       var descontoFaltas = await calcularDescontoFaltas(colab.id, parseInt(mes), parseInt(ano));
 
       // Desconto automatico de creditos activos (limitado para o liquido nao ficar negativo)
-      var maxDesconto = Math.max(0, Math.round((salarioBase + subsidios + horasExtras - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas) * 100) / 100);
+      var maxDesconto = Math.max(0, Math.round((salarioBase + subsidios + horasExtras - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas.total) * 100) / 100);
       var creditos = await calcularDescontosCreditos(colab.id, parseInt(mes), parseInt(ano), maxDesconto, { transaction: t });
-      var totalLiquido = Math.round((salarioBase + subsidios + horasExtras - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas - creditos.total) * 100) / 100;
+      var totalLiquido = Math.round((salarioBase + subsidios + horasExtras - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas.total - creditos.total) * 100) / 100;
 
       var pagamentoDados = {
         colaborador_id: colab.id,
@@ -781,7 +842,7 @@ var gerarPagamentosAutomaticos = async function (req, res) {
         descontos: creditos.total,
         irt: obrigatorios.irt,
         seguranca_social: obrigatorios.seguranca_social,
-        desconto_faltas: descontoFaltas,
+        desconto_faltas: descontoFaltas.total,
         total_liquido: totalLiquido,
         estado: estadoPagamento,
         data_pagamento: dataPagamento,
@@ -861,8 +922,9 @@ var previewDescontoFaltas = async function (req, res) {
       return res.status(400).json({ error: "colaborador_id, mes e ano sao obrigatorios" });
     }
     var apenasMes = req.query.apenas_mes === "true" || req.query.apenas_mes === "1";
-    var desconto = await calcularDescontoFaltas(colaborador_id, parseInt(mes), parseInt(ano), null, apenasMes);
-    return res.status(200).json({ dados: { desconto_faltas: desconto } });
+    var detalhe = await calcularDescontoFaltas(colaborador_id, parseInt(mes), parseInt(ano), null, apenasMes);
+    detalhe.desconto_faltas = detalhe.total;
+    return res.status(200).json({ dados: detalhe });
   } catch (e) {
     console.log("Erro ao preview desconto faltas:", e.message);
     return res.status(500).json({ error: "Erro interno do servidor" });

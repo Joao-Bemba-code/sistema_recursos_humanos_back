@@ -24,7 +24,7 @@ var generateRefreshToken = function (utilizador) {
   );
 };
 
-var serializarUtilizador = function (utilizador) {
+var serializarUtilizador = async function (utilizador) {
   prepararUtilizador(utilizador);
 
   var perfisTodos = [];
@@ -62,6 +62,13 @@ var serializarUtilizador = function (utilizador) {
   }
   json.perfis = perfisJson;
   json.multiPerfil = perfisJson.length > 1;
+
+  // O frontend usa utilizador.colaborador para filtrar as tarefas proprias.
+  var colaborador = await Colaborador.findOne({
+    where: { utilizador_id: utilizador.id, organizacao_id: utilizador.organizacao_id },
+    attributes: ["id", "numero_colaborador", "nome_completo"],
+  }).catch(function () { return null; });
+  if (colaborador) json.colaborador = colaborador.toJSON();
 
   return json;
 };
@@ -172,7 +179,7 @@ var login = async function (req, res) {
       mensagem: "Login realizado com sucesso",
       token: token,
       refreshToken: refreshToken,
-      utilizador: serializarUtilizador(utilizador),
+      utilizador: await serializarUtilizador(utilizador),
     });
   } catch (e) {
     console.log("Erro no login:", e.message);
@@ -243,7 +250,7 @@ var register = async function (req, res) {
     return res.status(201).json({
       mensagem: "Utilizador criado com sucesso",
       token: token,
-      utilizador: serializarUtilizador(completo),
+      utilizador: await serializarUtilizador(completo),
     });
   } catch (e) {
     console.log("Erro no register:", e.message);
@@ -254,7 +261,7 @@ var register = async function (req, res) {
 var getProfile = async function (req, res) {
   try {
     return res.status(200).json({
-      utilizador: serializarUtilizador(req.utilizador),
+      utilizador: await serializarUtilizador(req.utilizador),
     });
   } catch (e) {
     return res.status(500).json({ error: "Erro interno do servidor" });

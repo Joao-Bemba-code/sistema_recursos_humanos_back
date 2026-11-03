@@ -3,16 +3,17 @@ var { PicagemBiometrico, Colaborador, RegistoPresenca, Feriado, EscalaSemanal } 
 
 // Horario de trabalho por omissao (configuravel por env): entrada 08:00, saida
 // 16:00. Serve de FALLBACK para colaboradores sem escala semanal propria (ver
-// escalaDoDia). Ha uma TOLERANCIA de entrada (por omissao 40 min): quem entra
-// ate 40 min depois da hora esperada ainda conta como "Presente"; so depois
-// disso fica "Atrasado".
-// A saida esperada prolonga o tempo do atraso (ex.: entra 08:40 -> sai 16:40).
+// escalaDoDia). Ha uma TOLERANCIA de entrada (por omissao 15 min): quem entra
+// ate 15 min depois da hora esperada (ou seja, ate as 08:15) ainda conta como
+// "Presente"; so depois disso fica "Atrasado" (e a folha salarial desconta o
+// atraso minuto a minuto).
+// A saida esperada prolonga o tempo do atraso (ex.: entra 08:20 -> sai 16:20).
 // Enquanto o dia de hoje esta a decorrer (ja tem entrada, ainda sem saida) o
 // estado e "Em_Curso" — nao e Presente nem Atrasado, porque ainda pode mudar.
 var HORARIO_ENTRADA = (process.env.HORARIO_ENTRADA || "08:00").slice(0, 5);
 var HORARIO_SAIDA = (process.env.HORARIO_SAIDA || "16:00").slice(0, 5);
-var TOLERANCIA_MINUTOS = parseInt(process.env.TOLERANCIA_ENTRADA || "40", 10);
-if (isNaN(TOLERANCIA_MINUTOS) || TOLERANCIA_MINUTOS < 0) TOLERANCIA_MINUTOS = 40;
+var TOLERANCIA_MINUTOS = parseInt(process.env.TOLERANCIA_ENTRADA || "15", 10);
+if (isNaN(TOLERANCIA_MINUTOS) || TOLERANCIA_MINUTOS < 0) TOLERANCIA_MINUTOS = 15;
 // Separacao minima (minutos) entre a entrada e a seguinte picagem para essa
 // picagem contar como SAIDA. Sem isto, duas picagens seguidas de manha
 // (ex.: 07:55 e 08:03) eram lidas como entrada + saida.
