@@ -90,7 +90,7 @@ var listVencimentos = async function (req, res) {
     if (colaborador_id) where.colaborador_id = colaborador_id;
 
     var include = [
-      { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
+      { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco"] },
     ];
 
     if (search) {
@@ -129,7 +129,7 @@ var getVencimento = async function (req, res) {
   try {
     var vencimento = await Vencimento.findByPk(req.params.id, {
       include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
+        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco"] },
       ],
     });
 
@@ -410,7 +410,7 @@ var updateVencimento = async function (req, res) {
 
     var actualizado = await Vencimento.findByPk(req.params.id, {
       include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
+        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco"] },
       ],
     });
 
@@ -458,7 +458,7 @@ var listPagamentos = async function (req, res) {
     if (ano) where.ano = ano;
 
     var include = [
-      { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
+      { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco"] },
     ];
 
     if (search) {
@@ -628,7 +628,7 @@ var updatePagamento = async function (req, res) {
 
     var actualizado = await Pagamento.findByPk(req.params.id, {
       include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
+        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco"] },
       ],
     });
 
@@ -668,7 +668,7 @@ var recalcularFaltas = async function (req, res) {
 
     var actualizado = await Pagamento.findByPk(req.params.id, {
       include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
+        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco"] },
       ],
     });
 
@@ -900,7 +900,7 @@ var gerarPagamentosAutomaticos = async function (req, res) {
 var listarPagamentosParaResumo = async function (mes, ano) {
   var where = { mes: mes, ano: ano };
   var include = [
-    { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "organizacao_id"] },
+    { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco", "organizacao_id"] },
   ];
   try {
     var pagamentos = await Pagamento.findAll({

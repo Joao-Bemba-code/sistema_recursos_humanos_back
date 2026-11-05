@@ -317,7 +317,7 @@ exports.folhaSalarial = async function (req, res) {
 
     var descontos = [
       ["  IRT", pagamento.irt],
-      ["  Seguranca Social", pagamento.seguranca_social],
+      ["  INSS", pagamento.seguranca_social],
       ["  Outros Descontos", pagamento.descontos],
       ["  Desconto Faltas", pagamento.desconto_faltas],
     ];
@@ -1079,7 +1079,7 @@ exports.resumoPagamentos = async function (req, res) {
     resumoRow("  Subsidios", fmt(totalSubsidios) + " Kz");
     resumoRow("  Horas Extras", fmt(totalExtras) + " Kz");
     resumoRow("Total IRT", "- " + fmt(totalIRT) + " Kz");
-    resumoRow("Total Seguranca Social", "- " + fmt(totalSS) + " Kz");
+    resumoRow("Total INSS", "- " + fmt(totalSS) + " Kz");
     resumoRow("Total Desconto Faltas", "- " + fmt(totalFaltas) + " Kz");
     resumoRow("Total Descontos", "- " + fmt(totalDescontos) + " Kz");
 
@@ -1103,27 +1103,29 @@ exports.resumoPagamentos = async function (req, res) {
     doc.text("DETALHE POR COLABORADOR", ml, y);
     y += 18;
 
-    var headers = ["N.", "Colaborador", "Salario Base", "Subsidios", "Extras", "IRT", "SS", "Descontos", "Faltas", "Liquido", "Estado"];
-    var colWidths = [25, 150, 70, 62, 55, 55, 55, 60, 55, 70, 65];
+    var headers = ["N.", "Colaborador", "Salario Base", "Subsidios", "Extras", "IRT", "INSS", "Descontos", "Faltas", "Liquido", "IBAN", "Estado"];
+    var colWidths = [25, 130, 62, 50, 45, 45, 45, 48, 45, 60, 100, 50];
     var startX = 40;
     var tableW = pw - 80;
 
-    function drawRow(cells, yPos, isHeader, isTotal) {
+    function drawRow(cells, yPos, isHeader, isTotal, rowH, wrapIdx) {
+      rowH = rowH || 14;
+      wrapIdx = wrapIdx || [];
       var x = startX;
       doc.font(isHeader || isTotal ? "Helvetica-Bold" : "Helvetica").fontSize(isHeader ? 8.5 : 8).fillColor(isHeader ? "#ffffff" : isTotal ? "#111111" : "#333333");
       if (isHeader) {
         doc.rect(startX, yPos - 5, tableW, 18).fill("#2b3a4a");
         doc.fillColor("#ffffff");
       } else if (isTotal) {
-        doc.rect(startX, yPos - 5, tableW, 18).fill("#eef2f7");
+        doc.rect(startX, yPos - 5, tableW, rowH + 4).fill("#eef2f7");
         doc.fillColor("#111111");
       }
       x = startX;
       for (var c = 0; c < cells.length; c++) {
-        doc.text(String(cells[c]), x + 3, yPos, { width: colWidths[c] - 6, height: 14, ellipsis: true });
+        doc.text(String(cells[c]), x + 3, yPos, { width: colWidths[c] - 6, height: rowH, ellipsis: wrapIdx.indexOf(c) === -1 });
         x += colWidths[c];
       }
-      return yPos + 14;
+      return yPos + rowH;
     }
 
     // Header
@@ -1141,7 +1143,12 @@ exports.resumoPagamentos = async function (req, res) {
         y += 18;
       }
       var nome = (p.colaborador ? p.colaborador.nome_completo : "") || "";
-      if (nome.length > 28) nome = nome.substring(0, 26) + "...";
+      var iban = (p.colaborador ? p.colaborador.iban : "") || "";
+      // Nome e IBAN longos ocupam duas linhas na celula (sem cortar o texto)
+      var nomeDuasLinhas = nome.length > 24;
+      var ibanDuasLinhas = iban.length > 20;
+      var rowH = (nomeDuasLinhas || ibanDuasLinhas) ? 24 : 14;
+      var wrapIdx = [1, 10];
       var rowCells = [
         (r + 1),
         nome,
@@ -1153,9 +1160,10 @@ exports.resumoPagamentos = async function (req, res) {
         fmt(p.descontos),
         fmt(p.desconto_faltas),
         fmt(p.total_liquido),
+        iban,
         p.estado,
       ];
-      y = drawRow(rowCells, y, false, false);
+      y = drawRow(rowCells, y, false, false, rowH, wrapIdx);
     }
 
     // Linha de total
@@ -1171,6 +1179,7 @@ exports.resumoPagamentos = async function (req, res) {
       fmt(totalDescontos),
       fmt(totalFaltas),
       fmt(totalLiquido),
+      "",
       "",
     ], y, false, true);
     y += 24;
