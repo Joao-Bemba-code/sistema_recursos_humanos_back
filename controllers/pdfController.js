@@ -998,9 +998,17 @@ exports.resumoPagamentos = async function (req, res) {
       return res.status(400).json({ error: "mes e ano sao obrigatorios" });
     }
 
-    var pagamentos = await listarPagamentosParaResumo(parseInt(mes), parseInt(ano));
+    // Filtro opcional por unidade de negocio (vazio ou "Todas" = todas)
+    var unidade = req.query.unidade_negocio ? String(req.query.unidade_negocio).trim() : "";
+    var unidadesValidas = ["Artes Gráficas", "Formação Profissional", "Soluções Digitais"];
+    if (unidade && unidade !== "Todas" && unidadesValidas.indexOf(unidade) === -1) {
+      return res.status(400).json({ error: "Unidade de negócio inválida. Valores permitidos: " + unidadesValidas.join(", ") });
+    }
+    var mostrarUnidade = unidade && unidade !== "Todas";
+
+    var pagamentos = await listarPagamentosParaResumo(parseInt(mes), parseInt(ano), unidade);
     if (pagamentos.length === 0) {
-      return res.status(404).json({ error: "Nenhum pagamento encontrado para o periodo indicado" });
+      return res.status(404).json({ error: "Nenhum pagamento encontrado para o periodo indicado" + (mostrarUnidade ? " na unidade " + unidade : "") });
     }
 
     // Determinar organizacao a partir do primeiro colaborador que tenha organizacao
@@ -1014,8 +1022,11 @@ exports.resumoPagamentos = async function (req, res) {
     var org = await getOrganizacao(primeiroColab);
 
     var doc = new PDFDocument({ size: "A4", margin: 40, layout: "landscape" });
+    var slugUnidade = mostrarUnidade
+      ? unidade.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_")
+      : "";
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", "attachment; filename=resumo_pagamentos_" + mes + "_" + ano + ".pdf");
+    res.setHeader("Content-Disposition", "attachment; filename=resumo_pagamentos_" + mes + "_" + ano + (slugUnidade ? "_" + slugUnidade : "") + ".pdf");
     doc.pipe(res);
 
     var ml = 40;
@@ -1043,7 +1054,15 @@ exports.resumoPagamentos = async function (req, res) {
 
     doc.font("Helvetica").fontSize(10).fillColor("#666666");
     doc.text("Mes de " + MESES[parseInt(mes) - 1] + " de " + ano, ml, y, { align: "center", width: w });
-    y += 24;
+    y += 16;
+
+    if (mostrarUnidade) {
+      doc.font("Helvetica-Bold").fontSize(11).fillColor("#333333");
+      doc.text("Unidade de Negocio: " + normalizeForPdf(unidade), ml, y, { align: "center", width: w });
+      y += 20;
+    } else {
+      y += 8;
+    }
 
     // Agregacao
     var totalColab = pagamentos.length;
@@ -1103,8 +1122,8 @@ exports.resumoPagamentos = async function (req, res) {
     doc.text("DETALHE POR COLABORADOR", ml, y);
     y += 18;
 
-    var headers = ["N.", "Colaborador", "Salario Base", "Subsidios", "Extras", "IRT", "INSS", "Descontos", "Faltas", "Liquido", "IBAN", "Estado"];
-    var colWidths = [25, 130, 62, 50, 45, 45, 45, 48, 45, 60, 100, 50];
+    var headers = ["N.", "Colaborador", "IBAN", "Salario Base", "Subsidios", "Extras", "IRT", "INSS", "Descontos", "Faltas", "Liquido", "Estado"];
+    var colWidths = [25, 130, 100, 62, 50, 45, 45, 48, 45, 60, 50];
     var startX = 40;
     var tableW = pw - 80;
 
@@ -1148,10 +1167,11 @@ exports.resumoPagamentos = async function (req, res) {
       var nomeDuasLinhas = nome.length > 24;
       var ibanDuasLinhas = iban.length > 20;
       var rowH = (nomeDuasLinhas || ibanDuasLinhas) ? 24 : 14;
-      var wrapIdx = [1, 10];
+      var wrapIdx = [1, 2];
       var rowCells = [
         (r + 1),
         nome,
+        iban,
         fmt(p.salario_base),
         fmt(p.subsidios),
         fmt(p.horas_extras),
@@ -1160,7 +1180,6 @@ exports.resumoPagamentos = async function (req, res) {
         fmt(p.descontos),
         fmt(p.desconto_faltas),
         fmt(p.total_liquido),
-        iban,
         p.estado,
       ];
       y = drawRow(rowCells, y, false, false, rowH, wrapIdx);
@@ -1171,6 +1190,7 @@ exports.resumoPagamentos = async function (req, res) {
     drawRow([
       "",
       "TOTAL",
+      "",
       fmt(totalBruto),
       fmt(totalSubsidios),
       fmt(totalExtras),
@@ -1179,7 +1199,6 @@ exports.resumoPagamentos = async function (req, res) {
       fmt(totalDescontos),
       fmt(totalFaltas),
       fmt(totalLiquido),
-      "",
       "",
     ], y, false, true);
     y += 24;
