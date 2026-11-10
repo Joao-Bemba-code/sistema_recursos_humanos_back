@@ -81,8 +81,7 @@ var migrations = async function () {
       "`updatedAt` DATETIME NOT NULL, " +
       "PRIMARY KEY (`id`), " +
       "UNIQUE KEY `ocorrencias_numero_unique` (`numero`), " +
-      "KEY `ocorrencias_colaborador_fk` (`colaborador_id`), " +
-      "CONSTRAINT `ocorrencias_colaborador_fk` FOREIGN KEY (`colaborador_id`) REFERENCES `colaboradores` (`id`) ON DELETE SET NULL ON UPDATE CASCADE" +
+      "KEY `ocorrencias_colaborador_idx` (`colaborador_id`)" +
       ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
     );
     console.log(" Tabela 'ocorrencias_disciplinares' garantida!");

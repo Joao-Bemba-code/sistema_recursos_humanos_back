@@ -370,6 +370,10 @@ var syncDatabase = async () => {
         await sequelize.query("ALTER TABLE `colaboradores` ADD COLUMN `dias_descanso` VARCHAR(30) NULL DEFAULT '0,6'");
         console.log(" Coluna 'dias_descanso' adicionada!");
       }
+      if (nomes6.indexOf("unidade_negocio") === -1) {
+        await sequelize.query("ALTER TABLE `colaboradores` ADD COLUMN `unidade_negocio` ENUM('Artes Gráficas','Formação Profissional','Soluções Digitais') NULL");
+        console.log(" Coluna 'unidade_negocio' adicionada!");
+      }
     } catch (alterErr6) {
       console.log(" Aviso: problema ao tornar nome_completo nullable:", alterErr6.message);
     }
