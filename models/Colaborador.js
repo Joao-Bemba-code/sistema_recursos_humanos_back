@@ -120,6 +120,13 @@ var Colaborador = sequelize.define("Colaborador", {
     type: DataTypes.ENUM("Interno", "Externo", "Formador_Interno", "Formador_Externo", "Estagiario"),
     defaultValue: "Interno",
   },
+  // Unidade de negocio a que o colaborador pertence. Sao fixas as tres
+  // unidades da grafica; ver UNIDADES_NEGOCIO no frontend e
+  // UNIDADES_NEGOCIO_VALIDAS no folhaSalarialController.
+  unidade_negocio: {
+    type: DataTypes.ENUM("Artes Gráficas", "Formação Profissional", "Soluções Digitais"),
+    allowNull: true,
+  },
   estado: {
     type: DataTypes.ENUM("Activo", "Inactivo", "Suspenso", "Aposentado", "Desligado"),
     defaultValue: "Activo",

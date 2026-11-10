@@ -4,6 +4,20 @@ var { calcularDescontosCreditos, registarDescontosCreditos } = require("./credit
 
 // ==================== IMPOSTOS ANGOLA (IRT 2026 / INSS) ====================
 
+// Unidades de negocio que podem ser filtradas ao processar a folha
+// (mesma lista do ENUM unidade_negocio do modelo Colaborador)
+var UNIDADES_NEGOCIO_VALIDAS = ["Artes Gráficas", "Formação Profissional", "Soluções Digitais"];
+
+// Devolve a unidade pedida (string) ou null quando vem vazia/"Todas",
+// caso em que a folha e processada para todos os colaboradores ativos.
+var lerUnidadeNegocio = function (valor) {
+  if (valor === undefined || valor === null) return null;
+  var texto = String(valor).trim();
+  if (texto === "" || texto === "Todas" || texto === "todas") return null;
+  if (UNIDADES_NEGOCIO_VALIDAS.indexOf(texto) === -1) return false;
+  return texto;
+};
+
 var TAXA_SEGURANCA_SOCIAL = 0.03;
 var ISENCAO_SUBSIDIO_ALIMENTACAO = 30000;
 var TABELA_IRT = [
@@ -760,20 +774,33 @@ var gerarPagamentosAutomaticos = async function (req, res) {
       return res.status(400).json({ error: "mes e ano sao obrigatorios" });
     }
 
+    // Opcional: processar a folha apenas de uma unidade de negocio
+    var unidade = lerUnidadeNegocio(req.body.unidade_negocio);
+    if (unidade === false) {
+      return res.status(400).json({ error: "Unidade de negócio inválida. Valores permitidos: " + UNIDADES_NEGOCIO_VALIDAS.join(", ") });
+    }
+
     // Se marcar_pago for true, os pagamentos sao criados ja como "Pago" e os
     // pendentes existentes desse mes/ano tambem sao marcados como pagos.
     var marcarPago = req.body.marcar_pago === true || req.body.marcar_pago === "true";
     var estadoPagamento = marcarPago ? "Pago" : "Pendente";
     var dataPagamento = marcarPago ? formatarDataLocal(new Date()) : null;
 
-    // Colaboradores ativos
+    // Colaboradores ativos (de todas as unidades ou so da unidade escolhida)
+    var whereColaboradores = { estado: "Activo" };
+    if (unidade) whereColaboradores.unidade_negocio = unidade;
+
     var colaboradores = await Colaborador.findAll({
-      where: { estado: "Activo" },
-      attributes: ["id", "nome_completo", "numero_colaborador"],
+      where: whereColaboradores,
+      attributes: ["id", "nome_completo", "numero_colaborador", "unidade_negocio"],
     });
 
     if (colaboradores.length === 0) {
-      return res.status(400).json({ error: "Nenhum colaborador ativo encontrado" });
+      return res.status(400).json({
+        error: unidade
+          ? "Nenhum colaborador ativo na unidade de negócio " + unidade
+          : "Nenhum colaborador ativo encontrado",
+      });
     }
 
     var toNum = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; };
@@ -897,11 +924,14 @@ var gerarPagamentosAutomaticos = async function (req, res) {
 
 // ==================== RESUMO PDF (dados) ====================
 
-var listarPagamentosParaResumo = async function (mes, ano) {
+var listarPagamentosParaResumo = async function (mes, ano, unidade_negocio) {
   var where = { mes: mes, ano: ano };
   var include = [
-    { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco", "organizacao_id"] },
+    { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco", "organizacao_id", "unidade_negocio"] },
   ];
+  // Filtro opcional por unidade de negocio (vazio = todas)
+  var unidade = lerUnidadeNegocio(unidade_negocio);
+  if (unidade) include[0].where = { unidade_negocio: unidade };
   try {
     var pagamentos = await Pagamento.findAll({
       where: where,

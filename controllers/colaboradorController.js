@@ -1,6 +1,14 @@
 var { Op } = require("sequelize");
 var { Colaborador, Departamento, Cargo, Utilizador, Contrato, Ferias, SolicitacaoFerias, Licenca, RegistoPresenca, AvaliacaoDesempenho, InscricaoFormacao, OcorrenciaDisciplinar, Vencimento, Pagamento, PedidoColaborador } = require("../models");
 
+// Unidades de negocio fixas da grafica (mesma lista do ENUM do modelo
+// Colaborador e de UNIDADES_NEGOCIO_VALIDAS na folha salarial)
+var UNIDADES_NEGOCIO = ["Artes Gráficas", "Formação Profissional", "Soluções Digitais"];
+
+var unidadeInvalida = function (valor) {
+  return valor !== undefined && valor !== null && valor !== "" && UNIDADES_NEGOCIO.indexOf(valor) === -1;
+};
+
 var list = async function (req, res) {
   try {
     var page = parseInt(req.query.page) || 1;
@@ -10,6 +18,7 @@ var list = async function (req, res) {
     var estado = req.query.estado;
     var departamento_id = req.query.departamento_id;
     var tipo = req.query.tipo_colaborador;
+    var unidade_negocio = req.query.unidade_negocio;
 
     var where = {};
     if (req.organizacao_id) {
@@ -32,6 +41,12 @@ var list = async function (req, res) {
     }
     if (departamento_id) where.departamento_id = departamento_id;
     if (tipo) where.tipo_colaborador = tipo;
+    // "sem_unidade" filtra os colaboradores ainda sem unidade de negocio
+    if (unidade_negocio === "sem_unidade") {
+      where.unidade_negocio = { [Op.eq]: null };
+    } else if (unidade_negocio) {
+      where.unidade_negocio = unidade_negocio;
+    }
 
     var { count, rows } = await Colaborador.findAndCountAll({
       where: where,
@@ -99,12 +114,16 @@ var create = async function (req, res) {
     var dados = req.body;
     dados.organizacao_id = req.organizacao_id;
 
-    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico", "dias_descanso"];
+    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico", "dias_descanso", "unidade_negocio"];
     var chaves = Object.keys(dados);
     for (var i = 0; i < chaves.length; i++) {
       if (dados[chaves[i]] === "" && camposOpcionais.indexOf(chaves[i]) !== -1) {
         dados[chaves[i]] = null;
       }
+    }
+
+    if (unidadeInvalida(dados.unidade_negocio)) {
+      return res.status(400).json({ error: "Unidade de negócio inválida. Valores permitidos: " + UNIDADES_NEGOCIO.join(", ") });
     }
 
     // Dias de descanso: numeros de 0 (domingo) a 6 (sabado) separados por virgula
@@ -159,7 +178,7 @@ var update = async function (req, res) {
     var camposProtegidos = ["id", "organizacao_id", "numero_colaborador", "createdAt", "updatedAt"];
     var camposEnum = ["genero", "estado_civil", "tipo_colaborador", "estado"];
     var camposData = ["data_nascimento", "bi_validade", "data_admissao", "data_desligamento"];
-    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico", "dias_descanso"];
+    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico", "dias_descanso", "unidade_negocio"];
     var dadosActualizar = {};
 
     var keys = Object.keys(req.body);
@@ -170,6 +189,10 @@ var update = async function (req, res) {
       if (valor === "" && camposOpcionais.indexOf(keys[i]) !== -1) { dadosActualizar[keys[i]] = null; continue; }
       if (valor === undefined) continue;
       dadosActualizar[keys[i]] = valor;
+    }
+
+    if (unidadeInvalida(dadosActualizar.unidade_negocio)) {
+      return res.status(400).json({ error: "Unidade de negócio inválida. Valores permitidos: " + UNIDADES_NEGOCIO.join(", ") });
     }
 
     // Dias de descanso: numeros de 0 (domingo) a 6 (sabado) separados por virgula

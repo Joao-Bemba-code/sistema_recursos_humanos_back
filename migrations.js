@@ -201,6 +201,11 @@ var migrations = async function () {
     await alterarColuna("colaboradores", "nome_completo", "VARCHAR(200) NULL");
     await adicionarColuna("colaboradores", "id_biometrico", "VARCHAR(30) NULL");
     await adicionarColuna("colaboradores", "dias_descanso", "VARCHAR(30) NULL DEFAULT '0,6'");
+    // Unidade de negocio (folha salarial por unidade). As tres unidades fixas.
+    await adicionarColuna("colaboradores", "unidade_negocio", "ENUM('Artes Gráficas','Formação Profissional','Soluções Digitais') NULL");
+    await sequelize.query("ALTER TABLE `colaboradores` ADD INDEX `colaboradores_unidade_negocio_idx` (`unidade_negocio`)").catch(function (e) {
+      console.log(" Aviso: indice unidade_negocio ja existe ou nao pôde ser criado:", e.message);
+    });
 
     // ==================== FERIADOS ====================
     await sequelize.query(
