@@ -25,7 +25,7 @@ if (isNaN(MINUTOS_SAIDA) || MINUTOS_SAIDA < 1) MINUTOS_SAIDA = 60;
 var JANELA_ENTRADA_ANTES = 6 * 60;
 // Marcador de versao devolvido nas respostas da API. Permite confirmar (num
 // deploy em producao) que a versao com escalas/turnos ja esta activa.
-var VERSAO_ALGORITMO = "escalas-1";
+var VERSAO_ALGORITMO = "escalas-2";
 
 // Converte "HH:MM" (ou "HH:MM:SS") em minutos desde a meia-noite — ignora os
 // segundos, para a tolerancia ser contada por minuto inteiro (08:40:15 = 08:40).
@@ -260,9 +260,39 @@ var inicioJanelaAssiduidade = function (hoje) {
   return dataLocal(new Date(h.getFullYear(), h.getMonth() - 1, 1));
 };
 
+// Chave normalizada do id do biometro. O id vem de duas origens diferentes (a
+// ficha do colaborador, escrita a mao, e o aparelho, que devolve o numero do
+// utilizador), por vezes com espacos ou zeros a esquerda ("12", " 12", "012").
+// Sem normalizar, a mesma pessoa parecia "sem mapeamento" e os dias dela
+// ficavam sem presenca (entravam como falta). Nao e numerico puro: aceita o
+// que for, so remove espacos e zeros a esquerda quando for so digitos.
+var chaveBio = function (id) {
+  var s = String(id === null || id === undefined ? "" : id).trim();
+  if (/^\d+$/.test(s)) s = s.replace(/^0+(?=\d)/, "");
+  return s;
+};
+
 // Chave "id|data" para comparar dias (aceita Date ou "YYYY-MM-DD" do DATEONLY)
 var chaveDia = function (id, data) {
   return id + "|" + (dataLocal(data) || String(data));
+};
+
+// "HH:MM" a partir de qualquer representacao de hora ("7:04:42", "07:04",
+// "07:04:00"). O MySQL/TiDB devolve as colunas TIME por vezes sem o zero a
+// esquerda, o que fazia o comparador da reclassificacao achar que a hora tinha
+// mudado e regravar o mesmo registo em todos os ciclos.
+var horaTexto = function (hora) {
+  var m = paraMinutos(hora);
+  return m === null ? "" : deMinutos(m);
+};
+
+// Comparacao numerica das horas trabalhadas (a BD devolve DECIMAL como texto
+// "8.00" e o calculo devolve o numero 8 — eram sempre diferentes).
+var mesmasHoras = function (a, b) {
+  var vazioA = a === null || a === undefined || a === "";
+  var vazioB = b === null || b === undefined || b === "";
+  if (vazioA || vazioB) return vazioA && vazioB;
+  return Math.abs(Number(a) - Number(b)) < 0.011;
 };
 
 var calcularHorasTrabalhadas = function (horaEntrada, horaSaida) {
@@ -358,7 +388,7 @@ var sincronizar = async function (req, res) {
     });
     var mapa = {};
     for (var j = 0; j < colaboradores.length; j++) {
-      mapa[colaboradores[j].id_biometrico.toString().trim()] = colaboradores[j];
+      mapa[chaveBio(colaboradores[j].id_biometrico)] = colaboradores[j];
     }
     var mapaEscalas = await carregarMapaEscalas(colaboradores);
 
@@ -366,14 +396,31 @@ var sincronizar = async function (req, res) {
     var registosCriados = 0;
     var registosActualizados = 0;
 
-    // Agrupar as novas picagens
-    var novasPicagens = await PicagemBiometrico.findAll({ where: { id: { [Op.in]: idsNovos } }, order: [["data_hora", "ASC"]] });
+    // Nao sao so as picagens deste lote: entram tambem as que estao gravadas e
+    // ainda por processar. Acontece quando a pessoa e cadastrada no aparelho
+    // antes de o id ser posto na ficha: as picagens chegam, ficam guardadas sem
+    // dono e, quando o id e inserido, nada as voltava a processar — os dias
+    // ficavam em falta. O servidor trata dos repetidos, por isso reprocessar
+    // e seguro (e marca processada=true no fim de cada grupo).
+    var desdeData = new Date(janelaDesde + "T00:00:00");
+    var selecaoPendentes = null;
+    if (Object.keys(mapa).length > 0) {
+      selecaoPendentes = {
+        id_biometrico: { [Op.in]: Object.keys(mapa) },
+        processada: false,
+        data_hora: { [Op.gte]: desdeData },
+      };
+    }
+    var ondePicagens = selecaoPendentes
+      ? { [Op.or]: [{ id: { [Op.in]: idsNovos } }, selecaoPendentes] }
+      : { id: { [Op.in]: idsNovos } };
+    var novasPicagens = await PicagemBiometrico.findAll({ where: ondePicagens, order: [["data_hora", "ASC"]] });
     var grupos = {}; // chave: colabId|data -> { datas: [Date...], ids: [picagem ids] }
     for (var k = 0; k < novasPicagens.length; k++) {
       var np = novasPicagens[k];
-      var colab = mapa[np.id_biometrico];
+      var colab = mapa[chaveBio(np.id_biometrico)];
       if (!colab) {
-        semMapeamento++;
+        if (idsNovos.indexOf(np.id) !== -1) semMapeamento++;
         continue;
       }
       np.colaborador_id = colab.id;
@@ -385,6 +432,10 @@ var sincronizar = async function (req, res) {
     }
 
     var chavesGrupo = Object.keys(grupos);
+    // Linha de diagnostico no Render: "pendentes" sao as picagens gravadas ainda
+    // sem registo de presenca, "grupos" os dias que vao ser tratados. Se aqui o
+    // numero for 0 havendo picagens no aparelho, o id da ficha nao bate certo.
+    console.log("Biometro " + VERSAO_ALGORITMO + ": pendentes=" + novasPicagens.length + " grupos=" + chavesGrupo.length + " novos=" + novas);
     for (var g = 0; g < chavesGrupo.length; g++) {
       var grupo = grupos[chavesGrupo[g]];
       grupo.datas.sort(function (a, b) { return a - b; });
@@ -414,7 +465,7 @@ var sincronizar = async function (req, res) {
       // Sem entrada valida e sem registo: a picagem e' ruido (ex.: saida de um
       // turno nocturno que chegou de madrugada). Nao cria registo falso.
       if (!existente && !entrada) {
-        await PicagemBiometrico.update({ processada: true }, { where: { id: { [Op.in]: grupo.ids } } });
+        await PicagemBiometrico.update({ processada: true, colaborador_id: grupo.colab.id }, { where: { id: { [Op.in]: grupo.ids } } });
         continue;
       }
 
@@ -436,13 +487,13 @@ var sincronizar = async function (req, res) {
         // biometro nao lhe toca mais, para nao voltar a trocar o que o RH corrigiu
         // (ex.: esqueceu-se de meter o dedo e o RH passou a entrada a mao).
         if (existente.metodo === "Manual" || existente.ajustado_manual) {
-          await PicagemBiometrico.update({ processada: true }, { where: { id: { [Op.in]: grupo.ids } } });
+          await PicagemBiometrico.update({ processada: true, colaborador_id: grupo.colab.id }, { where: { id: { [Op.in]: grupo.ids } } });
           continue;
         }
         // Sem entrada valida, nao regride um registo existente (a picagem pode
         // ser a saida de um turno nocturno, processada pela reclassificacao).
         if (!entrada) {
-          await PicagemBiometrico.update({ processada: true }, { where: { id: { [Op.in]: grupo.ids } } });
+          await PicagemBiometrico.update({ processada: true, colaborador_id: grupo.colab.id }, { where: { id: { [Op.in]: grupo.ids } } });
           continue;
         }
         // Estado automatico: Ausente/Atrasado/Presente/Em_Curso sao recalculados pelo
@@ -466,25 +517,20 @@ var sincronizar = async function (req, res) {
         registosActualizados++;
       }
 
-      await PicagemBiometrico.update({ processada: true }, { where: { id: { [Op.in]: grupo.ids } } });
+      await PicagemBiometrico.update({ processada: true, colaborador_id: grupo.colab.id }, { where: { id: { [Op.in]: grupo.ids } } });
     }
 
-    // Marcar colaborador_id nas picagens mapeadas (para consulta)
-    if (novasPicagens.length > 0) {
-      for (var m = 0; m < novasPicagens.length; m++) {
-        if (novasPicagens[m].colaborador_id) {
-          await novasPicagens[m].update({ colaborador_id: novasPicagens[m].colaborador_id });
-        }
-      }
-    }
+    // 4) Reclassificar os registos da janela (tolerancia / "Em curso") e criar
+    // os registos em falta a partir de picagens ja gravadas.
+    // Isto VE PRIMEIRO que marcar as faltas: um dia em que a pessoa passou o
+    // dedo tem de virar Presente/Atrasado antes de o sistema procurar dias sem
+    // picagem. Na ordem antiga, o "Ausente" era criado primeiro e o dia ficava
+    // marcado como falta mesmo tendo picagens gravadas.
+    var resultadoReclass = await reclassificarAutomaticos(janelaDesde);
 
-    // 4) "Ausente" automatico: colaboradores mapeados, activos, dias de trabalho
+    // 5) "Ausente" automatico: colaboradores mapeados, activos, dias de trabalho
     // (segundo a escala/descanso de cada um) sem nenhuma picagem e sem registo
     var ausentesCriados = await marcarAusentesAutomaticos(colaboradores, mapaEscalas, janelaDesde);
-
-    // 5) Reclassificar os registos da janela (tolerancia / "Em curso") e criar
-    // os registos em falta a partir de picagens ja gravadas.
-    var resultadoReclass = await reclassificarAutomaticos(janelaDesde);
 
     return res.status(200).json({
       mensagem: "Picagens sincronizadas",
@@ -550,16 +596,26 @@ var marcarAusentesAutomaticos = async function (colaboradores, mapaEscalas, desd
   }
 
   // 1) Uma consulta: picagens da janela (para saber quem passou o dedo)
+  // Os ids sao comparados normalizados (ver chaveBio) e a consulta leva tambem
+  // as formas normais, para apanhar "012" gravado com zero a esquerda.
+  var idsProcurar = {};
+  for (var ic = 0; ic < colaboradores.length; ic++) {
+    var bruto = String(colaboradores[ic].id_biometrico === null || colaboradores[ic].id_biometrico === undefined ? "" : colaboradores[ic].id_biometrico);
+    if (bruto) idsProcurar[bruto] = true;
+    if (chaveBio(bruto)) idsProcurar[chaveBio(bruto)] = true;
+  }
+  var listaIdsProcurar = Object.keys(idsProcurar);
+  if (listaIdsProcurar.length === 0) return 0;
   var picagensMes = await PicagemBiometrico.findAll({
     attributes: ["id_biometrico", "data_hora"],
     where: {
-      id_biometrico: { [Op.in]: colaboradores.map(function (c) { return c.id_biometrico; }) },
+      id_biometrico: { [Op.in]: listaIdsProcurar },
       data_hora: { [Op.gte]: new Date(inicioJanela + "T00:00:00"), [Op.lte]: new Date(fimJanela + "T23:59:59") },
     },
   });
   var comPicagem = {};
   for (var p = 0; p < picagensMes.length; p++) {
-    comPicagem[chaveDia(picagensMes[p].id_biometrico, picagensMes[p].data_hora)] = true;
+    comPicagem[chaveDia(chaveBio(picagensMes[p].id_biometrico), picagensMes[p].data_hora)] = true;
   }
 
   // 2) Uma consulta: registos de presenca ja existentes na janela
@@ -601,7 +657,7 @@ var marcarAusentesAutomaticos = async function (colaboradores, mapaEscalas, desd
         if (agoraMinutos < minutosLimiteHoje) continue;
       }
       if (comRegisto[chaveDia(colab.id, dataStr)]) continue;
-      if (comPicagem[chaveDia(colab.id_biometrico, dataStr)]) continue;
+      if (comPicagem[chaveDia(chaveBio(colab.id_biometrico), dataStr)]) continue;
 
       try {
         await RegistoPresenca.create({
@@ -647,14 +703,12 @@ var reclassificarAutomaticos = async function (desdeStr) {
     where: { id_biometrico: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] } },
   });
   var colabById = {};
-  var idsBio = [];
   for (var ci = 0; ci < cols.length; ci++) {
     colabById[cols[ci].id] = cols[ci];
-    idsBio.push(cols[ci].id_biometrico);
   }
   var colabIdPorBio = {};
   for (var cm = 0; cm < cols.length; cm++) {
-    colabIdPorBio[String(cols[cm].id_biometrico).trim()] = cols[cm].id;
+    colabIdPorBio[chaveBio(cols[cm].id_biometrico)] = cols[cm].id;
   }
   var mapaEscalas = await carregarMapaEscalas(cols);
 
@@ -676,28 +730,33 @@ var reclassificarAutomaticos = async function (desdeStr) {
   // reconstruidas). Usa-se o fim do dia corrente.
   var fimDoDia = new Date(dataLocal(hoje) + "T23:59:59.999");
   var picagensPorDia = {};
-  if (idsBio.length > 0) {
-    var picagens = await PicagemBiometrico.findAll({
-      attributes: ["id_biometrico", "data_hora", "tipo"],
-      where: {
-        id_biometrico: { [Op.in]: idsBio },
-        data_hora: { [Op.gte]: new Date(desdeSql), [Op.lte]: fimDoDia },
-      },
-      order: [["data_hora", "ASC"]],
+  // Todas as picagens da janela (sem filtro pelo id da ficha): a correspondencia
+  // e feita aqui em JS, com o id normalizado e, se falhar, com o colaborador ja
+  // associado. Assim um id escrito "012" na ficha e "12" no aparelho (ou com um
+  // espaco) nao deixa o dia sem presenca. O limite protege de um historico
+  // enorme; a janela sao dois meses de picagens.
+  var picagens = await PicagemBiometrico.findAll({
+    attributes: ["id_biometrico", "colaborador_id", "data_hora", "tipo"],
+    where: {
+      data_hora: { [Op.gte]: new Date(desdeSql), [Op.lte]: fimDoDia },
+    },
+    order: [["data_hora", "ASC"]],
+    limit: 30000,
+  });
+  picagens.forEach(function (p) {
+    // Pelo id normalizado; se o id da ficha nao bater certo, aproveita o
+    // colaborador ja associado a picagem (o sincronizador preenche-o).
+    var colabId = colabIdPorBio[chaveBio(p.id_biometrico)] || p.colaborador_id;
+    if (!colabId || !colabById[colabId]) return;
+    var chave = colabId + "|" + dataLocal(p.data_hora);
+    if (!picagensPorDia[chave]) picagensPorDia[chave] = [];
+    picagensPorDia[chave].push({
+      hora: horaLocal(p.data_hora),
+      tipo: p.tipo === null || p.tipo === undefined ? null : parseInt(p.tipo, 10),
+      ts: new Date(p.data_hora),
+      dataStr: dataLocal(p.data_hora),
     });
-    picagens.forEach(function (p) {
-      var colabId = colabIdPorBio[String(p.id_biometrico).trim()];
-      if (!colabId) return;
-      var chave = colabId + "|" + dataLocal(p.data_hora);
-      if (!picagensPorDia[chave]) picagensPorDia[chave] = [];
-      picagensPorDia[chave].push({
-        hora: horaLocal(p.data_hora),
-        tipo: p.tipo === null || p.tipo === undefined ? null : parseInt(p.tipo, 10),
-        ts: new Date(p.data_hora),
-        dataStr: dataLocal(p.data_hora),
-      });
-    });
-  }
+  });
 
   var registosPorDia = {};
   registos.forEach(function (r) {
@@ -713,7 +772,10 @@ var reclassificarAutomaticos = async function (desdeStr) {
     var chave = chavesPicagens[ck];
     if (registosPorDia[chave]) continue;
     var partesChave = chave.split("|");
-    var colabId = parseInt(partesChave[0], 10);
+    // O id do colaborador e um UUID: transformar em numero dava NaN e este
+    // passo nunca criava os registos em falta (os dias com picagem gravada
+    // ficavam sem presenca nenhuma).
+    var colabId = partesChave[0];
     var dataStr = partesChave.slice(1).join("|");
     var colab = colabById[colabId];
     if (!colab) continue;
@@ -803,9 +865,9 @@ var reclassificarAutomaticos = async function (desdeStr) {
     if (
       novoEstado === registo.estado &&
       novaObs === registo.observacoes &&
-      String(entrada || "") === String(registo.hora_entrada || "") &&
-      String(saida || "") === String(registo.hora_saida || "") &&
-      String(novasHoras === null || novasHoras === undefined ? "" : novasHoras) === String(registo.horas_trabalhadas === null || registo.horas_trabalhadas === undefined ? "" : registo.horas_trabalhadas)
+      horaTexto(entrada) === horaTexto(registo.hora_entrada) &&
+      horaTexto(saida) === horaTexto(registo.hora_saida) &&
+      mesmasHoras(novasHoras, registo.horas_trabalhadas)
     ) {
       continue;
     }
