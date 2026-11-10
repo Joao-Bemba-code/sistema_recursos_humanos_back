@@ -1,4 +1,4 @@
-var { Op } = require("sequelize");
+var { Op, fn, col } = require("sequelize");
 var { PicagemBiometrico, Colaborador, RegistoPresenca, Feriado, EscalaSemanal } = require("../models");
 
 // Horario de trabalho por omissao (configuravel por env): entrada 08:00, saida
@@ -25,7 +25,21 @@ if (isNaN(MINUTOS_SAIDA) || MINUTOS_SAIDA < 1) MINUTOS_SAIDA = 60;
 var JANELA_ENTRADA_ANTES = 6 * 60;
 // Marcador de versao devolvido nas respostas da API. Permite confirmar (num
 // deploy em producao) que a versao com escalas/turnos ja esta activa.
-var VERSAO_ALGORITMO = "escalas-2";
+var VERSAO_ALGORITMO = "escalas-3";
+
+// A contagem de assiduidade DESTES ids comeca no dia da primeira picagem de
+// cada um: foram cadastrados no aparelho sexta 6/11, depois de a janela de
+// faltas ja ter aberto (dia 1 do mes anterior), por isso nao podem ter faltas
+// nem atrasos em dias em que ainda nao podiam picar. Para os restantes a
+// contagem continua como sempre. Ajustavel pela variavel de ambiente
+// BIOMETRO_IDS_DESDE_PRIMEIRA_PICAGEM (ex.: 12,13,14).
+var IDS_DESDE_PRIMEIRA_PICAGEM = (process.env.BIOMETRO_IDS_DESDE_PRIMEIRA_PICAGEM || "12,13,14")
+  .split(",")
+  .map(function (s) {
+    var t = String(s).trim();
+    return /^\d+$/.test(t) ? t.replace(/^0+(?=\d)/, "") : t;
+  })
+  .filter(Boolean);
 
 // Converte "HH:MM" (ou "HH:MM:SS") em minutos desde a meia-noite — ignora os
 // segundos, para a tolerancia ser contada por minuto inteiro (08:40:15 = 08:40).
@@ -275,6 +289,27 @@ var chaveBio = function (id) {
 // Chave "id|data" para comparar dias (aceita Date ou "YYYY-MM-DD" do DATEONLY)
 var chaveDia = function (id, data) {
   return id + "|" + (dataLocal(data) || String(data));
+};
+
+// Primeira picagem gravada de cada id do biometro: mapa chaveBio -> "YYYY-MM-DD".
+// A assiduidade so pode comecar a contar quando a pessoa comeca a passar o dedo:
+// quem e cadastrado no aparelho hoje nao pode ter faltas por nao picar na
+// semana passada. Dias antes da primeira picagem ficam de fora das faltas e os
+// "Ausente" automaticos ja criados para esses dias sao retirados.
+var primeiraPicagemPorBio = async function (listaIds) {
+  var mapa = {};
+  if (!listaIds || listaIds.length === 0) return mapa;
+  var primeiras = await PicagemBiometrico.findAll({
+    attributes: ["id_biometrico", [fn("MIN", col("data_hora")), "primeira"]],
+    where: { id_biometrico: { [Op.in]: listaIds } },
+    group: ["id_biometrico"],
+  });
+  for (var i = 0; i < primeiras.length; i++) {
+    var v = primeiras[i].get ? primeiras[i].get("primeira") : primeiras[i].primeira;
+    var dStr = dataLocal(v);
+    if (dStr) mapa[chaveBio(primeiras[i].id_biometrico)] = dStr;
+  }
+  return mapa;
 };
 
 // "HH:MM" a partir de qualquer representacao de hora ("7:04:42", "07:04",
@@ -618,6 +653,11 @@ var marcarAusentesAutomaticos = async function (colaboradores, mapaEscalas, desd
     comPicagem[chaveDia(chaveBio(picagensMes[p].id_biometrico), picagensMes[p].data_hora)] = true;
   }
 
+  // A contagem de faltas so comeca no dia da primeira picagem de cada um:
+  // antes disso a pessoa ainda nao estava a picar no aparelho (foi cadastrada
+  // depois), por isso nao pode estar em falta.
+  var primeiraDe = await primeiraPicagemPorBio(listaIdsProcurar);
+
   // 2) Uma consulta: registos de presenca ja existentes na janela
   var registosMes = await RegistoPresenca.findAll({
     attributes: ["colaborador_id", "data"],
@@ -651,6 +691,10 @@ var marcarAusentesAutomaticos = async function (colaboradores, mapaEscalas, desd
       var diaSemana = new Date(dataStr + "T00:00:00").getDay();
       var escalaDia = escalaDoDia(colab, mapaEscalas, diaSemana);
       if (!escalaDia) continue;
+      // Antes da primeira picagem nao ha falta — mas so para os ids da lista
+      // IDS_DESDE_PRIMEIRA_PICAGEM (quem foi cadastrado no aparelho a meio do mes)
+      var primeiraDoColab = primeiraDe[chaveBio(colab.id_biometrico)];
+      if (primeiraDoColab && dataStr < primeiraDoColab && IDS_DESDE_PRIMEIRA_PICAGEM.indexOf(chaveBio(colab.id_biometrico)) !== -1) continue;
       // Dia de hoje: so marca depois de passar a hora do turno + tolerancia
       if (dataStr === hojeStr) {
         var minutosLimiteHoje = paraMinutos(escalaDia.entrada || HORARIO_ENTRADA) + TOLERANCIA_MINUTOS;
@@ -707,9 +751,14 @@ var reclassificarAutomaticos = async function (desdeStr) {
     colabById[cols[ci].id] = cols[ci];
   }
   var colabIdPorBio = {};
+  var idsParaPrimeira = {};
   for (var cm = 0; cm < cols.length; cm++) {
     colabIdPorBio[chaveBio(cols[cm].id_biometrico)] = cols[cm].id;
+    var brutoP = String(cols[cm].id_biometrico === null || cols[cm].id_biometrico === undefined ? "" : cols[cm].id_biometrico);
+    if (brutoP) idsParaPrimeira[brutoP] = true;
+    if (chaveBio(brutoP)) idsParaPrimeira[chaveBio(brutoP)] = true;
   }
+  var primeiraDeReclass = await primeiraPicagemPorBio(Object.keys(idsParaPrimeira));
   var mapaEscalas = await carregarMapaEscalas(cols);
 
   var registos = await RegistoPresenca.findAll({
@@ -903,6 +952,15 @@ var reclassificarAutomaticos = async function (desdeStr) {
     }
     var colabReg2 = colabById[reg.colaborador_id];
     if (colabReg2) {
+      // Falta automatica antes da primeira picagem: nao faz sentido (a pessoa
+      // ainda nao estava a picar no aparelho) — retira-se. So para os ids da
+      // lista IDS_DESDE_PRIMEIRA_PICAGEM; os restantes ficam como sempre.
+      var primeiraReg = primeiraDeReclass[chaveBio(colabReg2.id_biometrico)];
+      if (primeiraReg && dataReg < primeiraReg && IDS_DESDE_PRIMEIRA_PICAGEM.indexOf(chaveBio(colabReg2.id_biometrico)) !== -1) {
+        await reg.destroy();
+        removidos++;
+        continue;
+      }
       var diaSemanaReg2 = new Date(dataReg + "T00:00:00").getDay();
       if (!escalaDoDia(colabReg2, mapaEscalas, diaSemanaReg2)) {
         await reg.destroy();
