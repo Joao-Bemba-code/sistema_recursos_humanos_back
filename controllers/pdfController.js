@@ -2,7 +2,8 @@ var PDFDocument = require("pdfkit");
 var path = require("path");
 var fs = require("fs");
 var os = require("os");
-var { Vencimento, Pagamento, Colaborador, Contrato, Organizacao } = require("../models");
+var { Op } = require("sequelize");
+var { Vencimento, Pagamento, Colaborador, Contrato, Organizacao, ConvocatoriaDisciplinar, MedidaDisciplinar } = require("../models");
 var { listarPagamentosParaResumo } = require("./folhaSalarialController");
 var { listarChecklist } = require("./documentoController");
 
@@ -1251,6 +1252,316 @@ exports.resumoPagamentos = async function (req, res) {
     doc.end();
   } catch (e) {
     console.log("Erro ao gerar PDF resumo pagamentos:", e.message);
+    return res.status(500).json({ error: "Erro ao gerar PDF" });
+  }
+};
+
+// ==================== PROCESSOS DISCIPLINARES ====================
+
+var MEDIDA_LABEL_PDF = {
+  Advertencia_verbal: "Advertência verbal",
+  Advertencia_escrita: "Advertência escrita",
+  Suspensao: "Suspensão",
+  Despedimento: "Despedimento",
+  Multa: "Multa",
+  Outra: "Outra",
+};
+
+var SITUACAO_LABEL_PDF = {
+  Em_analise: "Em análise",
+  Decidida: "Decidida",
+  Notificada: "Notificada",
+  Cumprida: "Cumprida",
+  Arquivada: "Arquivada",
+  Recorrida: "Recorrida",
+};
+
+async function drawProcessHeader(doc, org, titulo, subtitulo, y) {
+  var ml = 40;
+  var w = doc.page.width - 80;
+
+  try {
+    var logoSrc = await getLogoSrc(org);
+    if (logoSrc) {
+      doc.image(logoSrc, doc.page.width / 2 - 27.5, y, { fit: [55, 55] });
+      y += 72;
+    }
+  } catch (e) {}
+
+  var nomeOrg = (org && org.nome) ? org.nome : "SGHR";
+  doc.font("Helvetica-Bold").fontSize(15).fillColor("#1a1a1a");
+  doc.text(normalizeForPdf(nomeOrg), ml, y, { width: w, align: "center" });
+  y = doc.y + 5;
+
+  var info = [];
+  if (org && org.endereco) info.push(normalizeForPdf(org.endereco));
+  if (org && org.cidade) info.push(normalizeForPdf(org.cidade));
+  if (org && org.nif) info.push("NIF: " + org.nif);
+  if (info.length > 0) {
+    doc.font("Helvetica").fontSize(9).fillColor("#555555");
+    doc.text(info.join("  |  "), ml, y, { width: w, align: "center" });
+    y = doc.y + 7;
+  }
+
+  addLine(doc, y); y = doc.y + 18;
+
+  doc.font("Helvetica-Bold").fontSize(13).fillColor("#000000");
+  doc.text(titulo, ml, y, { width: w, align: "center" });
+  y = doc.y + 4;
+
+  if (subtitulo) {
+    doc.font("Helvetica").fontSize(10).fillColor("#333333");
+    doc.text(subtitulo, ml, y, { width: w, align: "center" });
+    y = doc.y + 4;
+  }
+
+  return y + 14;
+}
+
+// Desenha um bloco de título + texto corrido, com quebra de página.
+function drawProcessBlock(doc, titulo, texto, y) {
+  var ml = 40;
+  var w = doc.page.width - 80;
+
+  if (y > 720) { doc.addPage(); y = 50; }
+  doc.font("Helvetica-Bold").fontSize(10).fillColor("#000000");
+  doc.text(titulo, ml, y, { width: w });
+  y = doc.y + 5;
+
+  doc.font("Helvetica").fontSize(10).fillColor("#333333").lineGap(3);
+  doc.text(normalizeForPdf(texto || "—"), ml, y, { width: w, align: "justify" });
+  return doc.y + 14;
+}
+
+exports.convocatoriaDisciplinar = async function (req, res) {
+  try {
+    var conv = await ConvocatoriaDisciplinar.findByPk(req.params.id, {
+      include: [{ model: Colaborador, as: "colaborador", required: false }],
+    });
+    if (!conv) return res.status(404).json({ error: "Convocatória não encontrada" });
+    if (req.organizacao_id && conv.organizacao_id && String(conv.organizacao_id) !== String(req.organizacao_id)) {
+      return res.status(404).json({ error: "Convocatória não encontrada" });
+    }
+
+    var colab = conv.colaborador || null;
+    var org = await getOrganizacao(colab);
+    var doc = new PDFDocument({ size: "A4", margin: 50 });
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodeURIComponent("convocatoria_" + conv.numero_processo + ".pdf"));
+    doc.pipe(res);
+
+    var ml = 40;
+    var w = doc.page.width - 80;
+    var y = 50;
+
+    y = await drawProcessHeader(doc, org, "CONVOCATÓRIA PARA ENTREVISTA DISCIPLINAR", "Processo n.º " + conv.numero_processo, y);
+
+    doc.font("Helvetica").fontSize(10).fillColor("#333333");
+    doc.text(getDataAtual(), ml, y, { width: w, align: "right" });
+    y = doc.y + 18;
+
+    doc.font("Helvetica-Bold").fontSize(10).fillColor("#000000");
+    doc.text("Exmo.(a) Sr.(a)", ml, y, { width: w });
+    doc.text(normalizeForPdf(colab && colab.nome_completo ? colab.nome_completo : "Trabalhador(a)"), ml, doc.y + 2, { width: w });
+    if (colab && colab.numero_colaborador) {
+      doc.font("Helvetica").fontSize(9).fillColor("#555555");
+      doc.text("N.º de colaborador: " + colab.numero_colaborador, ml, doc.y + 2, { width: w });
+    }
+    y = doc.y + 18;
+
+    doc.font("Helvetica").fontSize(10).fillColor("#333333").lineGap(3);
+    doc.text(
+      "No âmbito do processo disciplinar n.º " + conv.numero_processo + ", e nos termos da legislação laboral em vigor, fica V. Ex.ª convocado(a) a comparecer a uma entrevista disciplinar, conforme os elementos seguintes.",
+      ml, y, { width: w, align: "justify" }
+    );
+    y = doc.y + 14;
+
+    y = drawProcessBlock(doc, "Factos imputados", conv.factos_imputados, y);
+
+    if (y > 640) { doc.addPage(); y = 50; }
+    doc.font("Helvetica-Bold").fontSize(10).fillColor("#000000");
+    doc.text("Data, hora e local da entrevista", ml, y, { width: w });
+    y = doc.y + 6;
+    doc.font("Helvetica").fontSize(10).fillColor("#333333").lineGap(3);
+    doc.text("Data: " + fmtDate(conv.data_entrevista), ml, y, { width: w });
+    doc.text("Hora: " + (conv.hora_entrevista || "a confirmar"), ml, doc.y + 2, { width: w });
+    doc.text("Local: " + (conv.local || "a confirmar"), ml, doc.y + 2, { width: w });
+    y = doc.y + 14;
+
+    if (conv.direitos_trabalhador) {
+      y = drawProcessBlock(doc, "Direitos do trabalhador", conv.direitos_trabalhador, y);
+    }
+
+    if (conv.data_entrega || conv.comprovativo_nome) {
+      var entrega = [];
+      if (conv.data_entrega) entrega.push("Entregue em " + fmtDate(conv.data_entrega));
+      if (conv.comprovativo_nome) entrega.push("Comprovativo: " + conv.comprovativo_nome);
+      y = drawProcessBlock(doc, "Notificação e entrega", entrega.join(" | "), y);
+    }
+
+    if (y > 660) { doc.addPage(); y = 50; }
+    doc.font("Helvetica").fontSize(10).fillColor("#333333").lineGap(3);
+    doc.text(
+      "A comparência é obrigatória. A falta de comparência sem justificação será apreciada nos termos da lei, sem prejuízo do direito de defesa do trabalhador.",
+      ml, y, { width: w, align: "justify" }
+    );
+    y = doc.y + 30;
+
+    if (y > 700) { doc.addPage(); y = 50; }
+    addLine(doc, y); y = doc.y + 14;
+    doc.font("Helvetica-Bold").fontSize(9).fillColor("#000000");
+    doc.text("A Entidade Empregadora", ml, y, { width: 230, align: "center" });
+    doc.text("O(a) Trabalhador(a)", 320, y, { width: 230, align: "center" });
+    y = doc.y + 20;
+    doc.font("Helvetica").fontSize(9).fillColor("#333333");
+    doc.text("Data: ____/____/______", ml, y, { width: 230, align: "center" });
+    doc.text(normalizeForPdf(colab && colab.nome_completo ? colab.nome_completo : ""), 320, y, { width: 230, align: "center" });
+
+    drawFooter(doc, org);
+    doc.end();
+  } catch (e) {
+    console.log("Erro ao gerar convocatória disciplinar:", e.message);
+    return res.status(500).json({ error: "Erro ao gerar PDF" });
+  }
+};
+
+exports.relatorioMedidasDisciplinares = async function (req, res) {
+  try {
+    var where = {};
+    if (req.organizacao_id) where.organizacao_id = req.organizacao_id;
+    if (req.query.situacao) where.situacao = String(req.query.situacao).slice(0, 30);
+    if (req.query.medida) where.medida = String(req.query.medida).slice(0, 60);
+    if (req.query.colaborador_id) where.colaborador_id = String(req.query.colaborador_id).slice(0, 36);
+
+    var de = req.query.de ? String(req.query.de).slice(0, 10) : null;
+    var ate = req.query.ate ? String(req.query.ate).slice(0, 10) : null;
+    if (de || ate) {
+      where.data_decisao = {};
+      if (de) where.data_decisao[Op.gte] = de;
+      if (ate) where.data_decisao[Op.lte] = ate;
+    }
+
+    var search = req.query.search ? String(req.query.search).trim() : "";
+    if (search) {
+      where[Op.or] = [
+        { numero_processo: { [Op.like]: "%" + search + "%" } },
+        { infracao: { [Op.like]: "%" + search + "%" } },
+        { autoridade_decisora: { [Op.like]: "%" + search + "%" } },
+      ];
+    }
+
+    var medidas = await MedidaDisciplinar.findAll({
+      where: where,
+      include: [{ model: Colaborador, as: "colaborador", required: false }],
+      order: [["data_decisao", "DESC"], ["createdAt", "DESC"]],
+      limit: 500,
+    });
+
+    var org = null;
+    if (medidas.length > 0 && medidas[0].colaborador) {
+      org = await getOrganizacao(medidas[0].colaborador);
+    }
+    if (!org && req.organizacao_id) {
+      org = await Organizacao.findByPk(req.organizacao_id);
+    }
+
+    var doc = new PDFDocument({ size: "A4", margin: 50 });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodeURIComponent("relatorio_medidas_disciplinares.pdf"));
+    doc.pipe(res);
+
+    var ml = 40;
+    var w = doc.page.width - 80;
+    var y = await drawProcessHeader(doc, org, "RELATÓRIO DE MEDIDAS DISCIPLINARES", "Histórico e controlo de prazos", 50);
+
+    doc.font("Helvetica").fontSize(9).fillColor("#555555");
+    doc.text("Gerado em " + getDataAtual(), ml, y, { width: w });
+    y = doc.y + 4;
+
+    var filtros = [];
+    if (req.query.situacao) filtros.push("Situação: " + (SITUACAO_LABEL_PDF[req.query.situacao] || req.query.situacao));
+    if (req.query.medida) filtros.push("Medida: " + (MEDIDA_LABEL_PDF[req.query.medida] || req.query.medida));
+    if (de) filtros.push("De: " + fmtDate(de));
+    if (ate) filtros.push("Até: " + fmtDate(ate));
+    if (search) filtros.push("Pesquisa: " + search);
+    if (filtros.length > 0) {
+      doc.text("Filtros — " + filtros.join(" | "), ml, doc.y + 2, { width: w });
+      y = doc.y + 6;
+    } else {
+      y += 8;
+    }
+
+    var contagem = {};
+    medidas.forEach(function (m) {
+      contagem[m.situacao] = (contagem[m.situacao] || 0) + 1;
+    });
+    var resumoPartes = ["Total: " + medidas.length];
+    Object.keys(contagem).forEach(function (s) {
+      resumoPartes.push((SITUACAO_LABEL_PDF[s] || s) + ": " + contagem[s]);
+    });
+    doc.font("Helvetica-Bold").fontSize(9).fillColor("#333333");
+    doc.text(resumoPartes.join("  |  "), ml, y, { width: w });
+    y = doc.y + 14;
+
+    var colX = [ml, ml + 78, ml + 205, ml + 300, ml + 365, ml + 440];
+    var colW = [78, 127, 95, 65, 75, 75];
+    var headers = ["Nº processo", "Colaborador", "Medida", "Decisão", "Situação", "Prazo"];
+
+    var desenharCabecalho = function (yy) {
+      doc.rect(ml, yy, w, 18).fill("#f2f2f2");
+      doc.fillColor("#333333").font("Helvetica-Bold").fontSize(8);
+      for (var h = 0; h < headers.length; h++) {
+        doc.text(headers[h], colX[h], yy + 5, { width: colW[h], lineBreak: false });
+      }
+      return yy + 18;
+    };
+
+    y = desenharCabecalho(y);
+    doc.font("Helvetica").fontSize(8).fillColor("#333333");
+
+    var hoje = new Date().toISOString().slice(0, 10);
+    for (var i = 0; i < medidas.length; i++) {
+      var m = medidas[i];
+      if (y > doc.page.height - 70) {
+        doc.addPage();
+        y = 50;
+        y = desenharCabecalho(y);
+        doc.font("Helvetica").fontSize(8).fillColor("#333333");
+      }
+
+      var nomeColab = m.colaborador ? m.colaborador.nome_completo : "—";
+      if (nomeColab.length > 30) nomeColab = nomeColab.slice(0, 28) + "…";
+      var processo = String(m.numero_processo || "—");
+      if (processo.length > 15) processo = processo.slice(0, 14) + "…";
+      var prazoTxt = m.prazo_limite ? fmtDate(m.prazo_limite) : "—";
+      var encerrada = m.situacao === "Cumprida" || m.situacao === "Arquivada";
+      var vencido = m.prazo_limite && String(m.prazo_limite).slice(0, 10) < hoje && !encerrada;
+
+      doc.fillColor("#333333");
+      doc.text(processo, colX[0], y + 4, { width: colW[0], lineBreak: false });
+      doc.text(normalizeForPdf(nomeColab), colX[1], y + 4, { width: colW[1], lineBreak: false });
+      doc.text(MEDIDA_LABEL_PDF[m.medida] || m.medida || "—", colX[2], y + 4, { width: colW[2], lineBreak: false });
+      doc.text(m.data_decisao ? fmtDate(m.data_decisao) : "—", colX[3], y + 4, { width: colW[3], lineBreak: false });
+      doc.text(SITUACAO_LABEL_PDF[m.situacao] || m.situacao || "—", colX[4], y + 4, { width: colW[4], lineBreak: false });
+      doc.fillColor(vencido ? "#b42318" : "#333333");
+      doc.text(prazoTxt + (vencido ? " (vencido)" : ""), colX[5], y + 4, { width: colW[5], lineBreak: false });
+
+      doc.moveTo(ml, y + 17).lineTo(ml + w, y + 17).strokeColor("#eeeeee").lineWidth(0.5).stroke();
+      doc.strokeColor("#000000");
+      y += 18;
+    }
+
+    if (medidas.length === 0) {
+      doc.font("Helvetica").fontSize(10).fillColor("#777777");
+      doc.text("Nenhuma medida disciplinar encontrada com os filtros indicados.", ml, y + 12, { width: w, align: "center" });
+      y += 30;
+    }
+
+    drawFooter(doc, org);
+    doc.end();
+  } catch (e) {
+    console.log("Erro ao gerar relatório de medidas disciplinares:", e.message);
     return res.status(500).json({ error: "Erro ao gerar PDF" });
   }
 };

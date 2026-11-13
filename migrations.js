@@ -808,6 +808,114 @@ var migrations = async function () {
       console.log(" Aviso: nao foi possivel conceder permissoes de documentos:", ePerm.message);
     }
 
+    // ==================== PROCESSOS DISCIPLINARES ====================
+    // Convocatoria para entrevista disciplinar e registo da medida aplicada.
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `convocatorias_disciplinares` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`organizacao_id` CHAR(36) NULL, " +
+      "`numero_processo` VARCHAR(40) NOT NULL, " +
+      "`colaborador_id` CHAR(36) NOT NULL, " +
+      "`factos_imputados` TEXT NOT NULL, " +
+      "`data_entrevista` DATE NOT NULL, " +
+      "`hora_entrevista` VARCHAR(5) NULL, " +
+      "`local` VARCHAR(200) NULL, " +
+      "`direitos_trabalhador` TEXT NULL, " +
+      "`estado` VARCHAR(30) NOT NULL DEFAULT 'Emitida', " +
+      "`data_emissao` DATE NULL, " +
+      "`comprovativo_url` VARCHAR(500) NULL, " +
+      "`comprovativo_nome` VARCHAR(255) NULL, " +
+      "`data_entrega` DATE NULL, " +
+      "`entregue_por` CHAR(36) NULL, " +
+      "`observacoes_entrevista` TEXT NULL, " +
+      "`emitido_por` CHAR(36) NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "KEY `conv_disc_org_idx` (`organizacao_id`), " +
+      "KEY `conv_disc_colaborador_idx` (`colaborador_id`), " +
+      "KEY `conv_disc_numero_idx` (`numero_processo`), " +
+      "KEY `conv_disc_estado_idx` (`estado`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'convocatorias_disciplinares' garantida!");
+
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `medidas_disciplinares` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`organizacao_id` CHAR(36) NULL, " +
+      "`numero_processo` VARCHAR(40) NOT NULL, " +
+      "`colaborador_id` CHAR(36) NOT NULL, " +
+      "`convocatoria_id` CHAR(36) NULL, " +
+      "`infracao` TEXT NOT NULL, " +
+      "`medida` VARCHAR(60) NOT NULL, " +
+      "`fundamentacao` TEXT NULL, " +
+      "`autoridade_decisora` VARCHAR(200) NULL, " +
+      "`data_decisao` DATE NULL, " +
+      "`data_inicio` DATE NULL, " +
+      "`data_fim` DATE NULL, " +
+      "`notificacao_data` DATE NULL, " +
+      "`notificacao_forma` VARCHAR(50) NULL, " +
+      "`comprovativo_url` VARCHAR(500) NULL, " +
+      "`comprovativo_nome` VARCHAR(255) NULL, " +
+      "`situacao` VARCHAR(30) NOT NULL DEFAULT 'Em_analise', " +
+      "`prazo_limite` DATE NULL, " +
+      "`observacoes` TEXT NULL, " +
+      "`registado_por` CHAR(36) NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "KEY `med_disc_org_idx` (`organizacao_id`), " +
+      "KEY `med_disc_colaborador_idx` (`colaborador_id`), " +
+      "KEY `med_disc_numero_idx` (`numero_processo`), " +
+      "KEY `med_disc_situacao_idx` (`situacao`), " +
+      "KEY `med_disc_prazo_idx` (`prazo_limite`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'medidas_disciplinares' garantida!");
+
+    // Permissao do novo modulo. Perfis que ja gerem advertencias recebem as
+    // mesmas operacoes; os perfis de RH e o Administrador recebem tudo.
+    try {
+      var nomesAcessoDisciplinar = ["Administrador Geral", "Director Geral", "Director de Recursos Humanos", "Técnico de RH"];
+      var perfisDisciplinar = await Perfil.findAll();
+      var alteradosDisciplinar = 0;
+      for (var pdi = 0; pdi < perfisDisciplinar.length; pdi++) {
+        var perfilDisc = perfisDisciplinar[pdi];
+        var permsDisc = perfilDisc.permissoes;
+        if (typeof permsDisc === "string") {
+          try { permsDisc = JSON.parse(permsDisc); } catch (e) { permsDisc = {}; }
+        }
+        if (!permsDisc || typeof permsDisc !== "object" || Array.isArray(permsDisc)) permsDisc = {};
+        if (Array.isArray(permsDisc.processos_disciplinares) && permsDisc.processos_disciplinares.length > 0) continue;
+
+        var temAcessoDisc = (perfilDisc.nivel || 0) >= 4 ||
+          nomesAcessoDisciplinar.indexOf(perfilDisc.nome) !== -1 ||
+          (Array.isArray(permsDisc.advertencias) && permsDisc.advertencias.length > 0);
+        if (!temAcessoDisc) continue;
+
+        var opsDisc = ["create", "read", "update", "delete"];
+        if (Array.isArray(permsDisc.advertencias) && permsDisc.advertencias.length > 0) {
+          var copiadas = [];
+          for (var odi = 0; odi < opsDisc.length; odi++) {
+            if (permsDisc.advertencias.indexOf(opsDisc[odi]) !== -1) copiadas.push(opsDisc[odi]);
+          }
+          if (copiadas.indexOf("read") === -1) copiadas.push("read");
+          opsDisc = copiadas;
+        }
+        permsDisc.processos_disciplinares = opsDisc;
+        perfilDisc.permissoes = permsDisc;
+        perfilDisc.changed("permissoes", true);
+        await perfilDisc.save();
+        alteradosDisciplinar++;
+      }
+      if (alteradosDisciplinar > 0) {
+        console.log(" Permissao 'processos_disciplinares' concedida a " + alteradosDisciplinar + " perfil(is)!");
+      }
+    } catch (ePermDisc) {
+      console.log(" Aviso: nao foi possivel conceder permissoes disciplinares:", ePermDisc.message);
+    }
+
     console.log(" Migracoes concluidas com sucesso!");
   } catch (e) {
     console.log(" Erro nas migracoes:", e.message);

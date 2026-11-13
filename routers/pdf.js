@@ -7,5 +7,7 @@ router.get("/resumo-pagamentos", pdf.resumoPagamentos);
 router.get("/contrato/:id", pdf.contrato);
 router.get("/colaborador/:id", pdf.fichaColaborador);
 router.get("/aviso-advertencia/:colaboradorId", pdf.avisoAdvertencia);
+router.get("/convocatoria-disciplinar/:id", pdf.convocatoriaDisciplinar);
+router.get("/medidas-disciplinares", pdf.relatorioMedidasDisciplinares);
 
 module.exports = router;

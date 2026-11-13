@@ -15,6 +15,7 @@ var { RegistoPresenca, Turno } = require("./Assiduidade");
 var { CicloAvaliacao, AvaliacaoDesempenho } = require("./Avaliacao");
 var { CursoFormacao, InscricaoFormacao } = require("./Formacao");
 var OcorrenciaDisciplinar = require("./Disciplinar");
+var { ConvocatoriaDisciplinar, MedidaDisciplinar } = require("./ProcessoDisciplinar");
 var { Vencimento, Pagamento } = require("./FolhaSalarial");
 var { Credito, CreditoMovimento } = require("./Credito");
 var { PicagemBiometrico } = require("./Biometro");
@@ -142,6 +143,14 @@ InscricaoFormacao.belongsTo(CursoFormacao, { foreignKey: "curso_id", as: "curso"
 // Colaborador -> OcorrenciasDisciplinares
 Colaborador.hasMany(OcorrenciaDisciplinar, { foreignKey: "colaborador_id", as: "ocorrencias" });
 OcorrenciaDisciplinar.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador" });
+
+// Processos disciplinares: convocatorias e medidas (sem FKs na BD, TiDB)
+Colaborador.hasMany(ConvocatoriaDisciplinar, { foreignKey: "colaborador_id", as: "convocatorias_disciplinares", constraints: false });
+ConvocatoriaDisciplinar.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador", constraints: false });
+Colaborador.hasMany(MedidaDisciplinar, { foreignKey: "colaborador_id", as: "medidas_disciplinares", constraints: false });
+MedidaDisciplinar.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador", constraints: false });
+ConvocatoriaDisciplinar.hasMany(MedidaDisciplinar, { foreignKey: "convocatoria_id", as: "medidas", constraints: false });
+MedidaDisciplinar.belongsTo(ConvocatoriaDisciplinar, { foreignKey: "convocatoria_id", as: "convocatoria", constraints: false });
 
 // Colaborador -> Vencimentos
 Colaborador.hasMany(Vencimento, { foreignKey: "colaborador_id", as: "vencimentos" });
@@ -590,6 +599,8 @@ module.exports = {
   CursoFormacao,
   InscricaoFormacao,
   OcorrenciaDisciplinar,
+  ConvocatoriaDisciplinar,
+  MedidaDisciplinar,
   Vencimento,
   Pagamento,
   Credito,
