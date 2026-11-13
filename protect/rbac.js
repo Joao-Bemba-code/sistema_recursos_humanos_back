@@ -16,6 +16,7 @@ var MODULOS_SISTEMA = [
   { chave: "portal", nome: "Portal" },
   { chave: "comunicados", nome: "Comunicados" },
   { chave: "tarefas", nome: "Gestão de Tarefas" },
+  { chave: "documentos_colaborador", nome: "Documentos de Colaborador" },
   // NOTA: "creditos" fica de fora de propósito — o módulo é exclusivo do
   // Administrador (nível 4) e não é gerido pela matriz de permissões.
 ];
@@ -184,6 +185,15 @@ var requirePermission = function (modulo, operacao) {
   };
 };
 
+// Verificação directa (fora de middleware), usada quando uma rota precisa de
+// validar duas permissões diferentes no mesmo pedido.
+var temPermissao = function (utilizador, modulo, operacao) {
+  if (!utilizador) return false;
+  var fundido = fundirPermissoes(perfisUtilizador(utilizador));
+  if (fundido.nivel >= 4) return true;
+  return !!(fundido.permissoes[modulo] && fundido.permissoes[modulo].indexOf(operacao) !== -1);
+};
+
 // Acesso baseado em módulo: passa apenas com permissão explícita no
 // módulo/operação ou se o utilizador for administrador (nível 4).
 var requireModulo = function (modulo, operacao) {
@@ -256,6 +266,7 @@ module.exports = {
   requirePermission,
   requireModulo,
   requireModuloOuRole,
+  temPermissao,
   normalizarPermissoes,
   normalizarPermissoesSistema,
   perfisUtilizador,

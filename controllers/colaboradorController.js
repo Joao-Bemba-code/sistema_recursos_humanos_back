@@ -1,5 +1,7 @@
 var { Op } = require("sequelize");
 var { Colaborador, Departamento, Cargo, Utilizador, Contrato, Ferias, SolicitacaoFerias, Licenca, RegistoPresenca, AvaliacaoDesempenho, InscricaoFormacao, OcorrenciaDisciplinar, Vencimento, Pagamento, PedidoColaborador } = require("../models");
+var documentoController = require("./documentoController");
+var { temPermissao } = require("../protect/rbac");
 
 // Unidades de negocio fixas da grafica (mesma lista do ENUM do modelo
 // Colaborador e de UNIDADES_NEGOCIO_VALIDAS na folha salarial)
@@ -114,7 +116,26 @@ var create = async function (req, res) {
     var dados = req.body;
     dados.organizacao_id = req.organizacao_id;
 
-    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico", "dias_descanso", "unidade_negocio"];
+    // Documentos vem aninhados no formulario, mas nao sao colunas da tabela.
+    var documentos = Array.isArray(dados.documentos) ? dados.documentos : [];
+    delete dados.documentos;
+
+    // Rascunho: permite guardar sem data de admissao; nao conta como activo.
+    var rascunho = dados.rascunho === true || dados.rascunho === "true";
+    dados.rascunho = rascunho;
+    if (rascunho) {
+      dados.estado = "Inactivo";
+    } else if (!dados.data_admissao) {
+      return res.status(400).json({ error: "Preencha a Data de Admissão para concluir o registo" });
+    }
+
+    if (documentos.length > 0 &&
+      !temPermissao(req.utilizador, "documentos_colaborador", "create") &&
+      !temPermissao(req.utilizador, "documentos_colaborador", "update")) {
+      return res.status(403).json({ error: "Sem permissão para anexar documentos" });
+    }
+
+    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "data_admissao", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico", "dias_descanso", "unidade_negocio"];
     var chaves = Object.keys(dados);
     for (var i = 0; i < chaves.length; i++) {
       if (dados[chaves[i]] === "" && camposOpcionais.indexOf(chaves[i]) !== -1) {
@@ -155,6 +176,10 @@ var create = async function (req, res) {
 
     var colaborador = await Colaborador.create(dados);
 
+    if (documentos.length > 0) {
+      await documentoController.aplicarDocumentos(colaborador, documentos, req.utilizador);
+    }
+
     return res.status(201).json({
       mensagem: "Colaborador criado com sucesso",
       dados: colaborador,
@@ -175,11 +200,13 @@ var update = async function (req, res) {
       return res.status(404).json({ error: "Colaborador não encontrado" });
     }
 
-    var camposProtegidos = ["id", "organizacao_id", "numero_colaborador", "createdAt", "updatedAt"];
+    var camposProtegidos = ["id", "organizacao_id", "numero_colaborador", "createdAt", "updatedAt", "documentos", "rascunho"];
     var camposEnum = ["genero", "estado_civil", "tipo_colaborador", "estado"];
     var camposData = ["data_nascimento", "bi_validade", "data_admissao", "data_desligamento"];
-    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico", "dias_descanso", "unidade_negocio"];
+    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "data_admissao", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico", "dias_descanso", "unidade_negocio"];
     var dadosActualizar = {};
+
+    var documentos = Array.isArray(req.body.documentos) ? req.body.documentos : [];
 
     var keys = Object.keys(req.body);
     for (var i = 0; i < keys.length; i++) {
@@ -189,6 +216,28 @@ var update = async function (req, res) {
       if (valor === "" && camposOpcionais.indexOf(keys[i]) !== -1) { dadosActualizar[keys[i]] = null; continue; }
       if (valor === undefined) continue;
       dadosActualizar[keys[i]] = valor;
+    }
+
+    // Concluir um rascunho: exige a data de admissao. Guardar como rascunho
+    // mantem o colaborador fora dos activos.
+    var fecharRascunho = false;
+    if (req.body.rascunho !== undefined) {
+      var rascunho = req.body.rascunho === true || req.body.rascunho === "true";
+      dadosActualizar.rascunho = rascunho;
+      if (rascunho) {
+        dadosActualizar.estado = "Inactivo";
+      } else {
+        fecharRascunho = true;
+      }
+    }
+    if (fecharRascunho && !(dadosActualizar.data_admissao || colaborador.data_admissao)) {
+      return res.status(400).json({ error: "Preencha a Data de Admissão para concluir o registo" });
+    }
+
+    if (documentos.length > 0 &&
+      !temPermissao(req.utilizador, "documentos_colaborador", "update") &&
+      !temPermissao(req.utilizador, "documentos_colaborador", "create")) {
+      return res.status(403).json({ error: "Sem permissão para alterar documentos" });
     }
 
     if (unidadeInvalida(dadosActualizar.unidade_negocio)) {
@@ -219,6 +268,10 @@ var update = async function (req, res) {
     }
 
     await colaborador.update(dadosActualizar);
+
+    if (documentos.length > 0) {
+      await documentoController.aplicarDocumentos(colaborador, documentos, req.utilizador);
+    }
 
     var actualizado = await Colaborador.findByPk(req.params.id, {
       include: [
@@ -317,7 +370,7 @@ var stats = async function (req, res) {
       "SUM(CASE WHEN tipo_colaborador = 'Externo' AND estado = 'Activo' THEN 1 ELSE 0 END) AS externos, " +
       "SUM(CASE WHEN tipo_colaborador = 'Formador_Interno' AND estado = 'Activo' THEN 1 ELSE 0 END) AS formadores_internos, " +
       "SUM(CASE WHEN tipo_colaborador = 'Formador_Externo' AND estado = 'Activo' THEN 1 ELSE 0 END) AS formadores_externos " +
-      "FROM colaboradores WHERE 1=1" + orgFilter;
+      "FROM colaboradores WHERE (rascunho = 0 OR rascunho IS NULL)" + orgFilter;
 
     var [result] = await Colaborador.sequelize.query(sql, { replacements: params });
 

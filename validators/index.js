@@ -33,8 +33,10 @@ var authValidation = [
 ];
 
 var collaboratorValidation = [
+  // Opcional para permitir "Guardar rascunho"; o controlador exige a data
+  // quando o registo e concluido.
   body("data_admissao")
-    .notEmpty().withMessage("Data de admissão é obrigatória")
+    .optional({ checkFalsy: true })
     .isISO8601().withMessage("Data de admissão inválida"),
   body("nome_completo")
     .optional({ checkFalsy: true })

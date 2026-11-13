@@ -1,5 +1,5 @@
 var { sequelize } = require("./config");
-var { sequelize: syncModel } = require("./models");
+var { sequelize: syncModel, Perfil } = require("./models");
 
 // Utilitários idempotentes
 var colunasDaTabela = async function (tabela) {
@@ -692,6 +692,121 @@ var migrations = async function () {
     await adicionarColuna("mensagens", "anexo_tipo", "VARCHAR(120) NULL");
     await adicionarColuna("mensagens", "anexo_tamanho", "INT NULL");
     console.log(" Colunas de anexo em 'mensagens' garantidas!");
+
+    // ==================== DOCUMENTOS DO COLABORADOR ====================
+    // Fotografia, CV, BI, certificado, contrato assinado e outros anexos.
+    // O estado da conferencia (Em falta / Por conferir / Validado / A corrigir)
+    // e o rasto de quem carregou/substituiu/validou ficam na BD.
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `colaborador_documentos` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`colaborador_id` CHAR(36) NOT NULL, " +
+      "`organizacao_id` CHAR(36) NULL, " +
+      "`categoria` VARCHAR(30) NOT NULL, " +
+      "`tipo_documento` VARCHAR(150) NULL, " +
+      "`descricao` TEXT NULL, " +
+      "`ficheiro_url` VARCHAR(500) NULL, " +
+      "`ficheiro_nome` VARCHAR(255) NULL, " +
+      "`ficheiro_tipo` VARCHAR(150) NULL, " +
+      "`ficheiro_tamanho` INT NULL, " +
+      "`estado` VARCHAR(30) NOT NULL DEFAULT 'Em falta', " +
+      "`motivo_correcao` TEXT NULL, " +
+      "`carregado_por` CHAR(36) NULL, " +
+      "`carregado_em` DATETIME NULL, " +
+      "`validado_por` CHAR(36) NULL, " +
+      "`validado_em` DATETIME NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "KEY `colab_docs_colaborador_idx` (`colaborador_id`), " +
+      "KEY `colab_docs_org_idx` (`organizacao_id`), " +
+      "KEY `colab_docs_estado_idx` (`estado`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'colaborador_documentos' garantida!");
+
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `colaborador_documento_eventos` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`documento_id` CHAR(36) NOT NULL, " +
+      "`colaborador_id` CHAR(36) NOT NULL, " +
+      "`organizacao_id` CHAR(36) NULL, " +
+      "`acao` VARCHAR(30) NOT NULL, " +
+      "`estado_anterior` VARCHAR(30) NULL, " +
+      "`estado_novo` VARCHAR(30) NULL, " +
+      "`ficheiro_url` VARCHAR(500) NULL, " +
+      "`ficheiro_url_anterior` VARCHAR(500) NULL, " +
+      "`ficheiro_nome` VARCHAR(255) NULL, " +
+      "`motivo` TEXT NULL, " +
+      "`utilizador_id` CHAR(36) NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "KEY `colab_doc_eventos_documento_idx` (`documento_id`), " +
+      "KEY `colab_doc_eventos_colaborador_idx` (`colaborador_id`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'colaborador_documento_eventos' garantida!");
+
+    // Rascunho do registo: permite Guardar rascunho sem data de admissao.
+    await adicionarColuna("colaboradores", "rascunho", "BOOLEAN NOT NULL DEFAULT false");
+    // A data de admissao passa a ser opcional enquanto o registo e rascunho.
+    await alterarColuna("colaboradores", "data_admissao", "DATE NULL");
+
+    // Backfill: fotografias e curriculos que ja existiam na ficha passam a ter
+    // um documento registado (com a data de criacao do colaborador), sem
+    // duplicar os que ja foram migrados.
+    try {
+      await sequelize.query(
+        "INSERT INTO `colaborador_documentos` " +
+        "(`id`, `colaborador_id`, `organizacao_id`, `categoria`, `ficheiro_url`, `estado`, `carregado_em`, `createdAt`, `updatedAt`) " +
+        "SELECT UUID(), c.`id`, c.`organizacao_id`, 'fotografia', c.`fotografia`, 'Validado', c.`createdAt`, NOW(), NOW() " +
+        "FROM `colaboradores` c " +
+        "WHERE c.`fotografia` IS NOT NULL AND c.`fotografia` <> '' " +
+        "AND NOT EXISTS (SELECT 1 FROM `colaborador_documentos` d WHERE d.`colaborador_id` = c.`id` AND d.`categoria` = 'fotografia')"
+      );
+      await sequelize.query(
+        "INSERT INTO `colaborador_documentos` " +
+        "(`id`, `colaborador_id`, `organizacao_id`, `categoria`, `ficheiro_url`, `estado`, `carregado_em`, `createdAt`, `updatedAt`) " +
+        "SELECT UUID(), c.`id`, c.`organizacao_id`, 'curriculo', c.`curriculo`, 'Validado', c.`createdAt`, NOW(), NOW() " +
+        "FROM `colaboradores` c " +
+        "WHERE c.`curriculo` IS NOT NULL AND c.`curriculo` <> '' " +
+        "AND NOT EXISTS (SELECT 1 FROM `colaborador_documentos` d WHERE d.`colaborador_id` = c.`id` AND d.`categoria` = 'curriculo')"
+      );
+      console.log(" Fotografias e curriculos existentes migrados para 'colaborador_documentos'!");
+    } catch (eDocs) {
+      console.log(" Aviso: backfill de documentos existentes:", eDocs.message);
+    }
+
+    // Permissoes: o novo modulo de documentos fica acessivel aos perfis de RH
+    // que ja gerem colaboradores. O Administrador (nivel 4) passa sempre.
+    try {
+      var nomesComAcesso = ["Administrador Geral", "Director Geral", "Director de Recursos Humanos", "Técnico de RH"];
+      var perfisExistentes = await Perfil.findAll();
+      var alterados = 0;
+      for (var pi = 0; pi < perfisExistentes.length; pi++) {
+        var perfil = perfisExistentes[pi];
+        var temAcesso = (perfil.nivel || 0) >= 4 || nomesComAcesso.indexOf(perfil.nome) !== -1;
+        if (!temAcesso) continue;
+        var perms = perfil.permissoes;
+        if (typeof perms === "string") {
+          try { perms = JSON.parse(perms); } catch (e) { perms = {}; }
+        }
+        if (!perms || typeof perms !== "object" || Array.isArray(perms)) perms = {};
+        if (!Array.isArray(perms.documentos_colaborador) || perms.documentos_colaborador.length === 0) {
+          perms.documentos_colaborador = ["create", "read", "update", "delete"];
+          perfil.permissoes = perms;
+          perfil.changed("permissoes", true);
+          await perfil.save();
+          alterados++;
+        }
+      }
+      if (alterados > 0) {
+        console.log(" Permissao 'documentos_colaborador' concedida a " + alterados + " perfil(is)!");
+      }
+    } catch (ePerm) {
+      console.log(" Aviso: nao foi possivel conceder permissoes de documentos:", ePerm.message);
+    }
 
     console.log(" Migracoes concluidas com sucesso!");
   } catch (e) {

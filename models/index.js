@@ -5,6 +5,7 @@ var Perfil = require("./Perfil");
 var Utilizador = require("./Utilizador");
 var UtilizadorPerfil = require("./UtilizadorPerfil");
 var Colaborador = require("./Colaborador");
+var { ColaboradorDocumento, ColaboradorDocumentoEvento } = require("./ColaboradorDocumento");
 var { Departamento, Cargo } = require("./Estrutura");
 var Seccao = require("./Seccao");
 var SeccaoMembro = require("./SeccaoMembro");
@@ -59,6 +60,14 @@ Colaborador.belongsTo(Organizacao, { foreignKey: "organizacao_id", as: "organiza
 // Utilizador -> Colaborador (1:1)
 Utilizador.hasOne(Colaborador, { foreignKey: "utilizador_id", as: "colaborador" });
 Colaborador.belongsTo(Utilizador, { foreignKey: "utilizador_id", as: "utilizador" });
+
+// Colaborador -> Documentos (sem FKs a nivel de BD para compatibilidade com TiDB)
+Colaborador.hasMany(ColaboradorDocumento, { foreignKey: "colaborador_id", as: "documentos", constraints: false });
+ColaboradorDocumento.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador", constraints: false });
+
+ColaboradorDocumento.hasMany(ColaboradorDocumentoEvento, { foreignKey: "documento_id", as: "eventos", constraints: false });
+ColaboradorDocumentoEvento.belongsTo(ColaboradorDocumento, { foreignKey: "documento_id", as: "documento", constraints: false });
+ColaboradorDocumentoEvento.belongsTo(Utilizador, { foreignKey: "utilizador_id", as: "utilizador", constraints: false });
 
 // Organizacao -> Departamento
 Organizacao.hasMany(Departamento, { foreignKey: "organizacao_id", as: "departamentos" });
@@ -564,6 +573,8 @@ module.exports = {
   Utilizador,
   UtilizadorPerfil,
   Colaborador,
+  ColaboradorDocumento,
+  ColaboradorDocumentoEvento,
   Departamento,
   Cargo,
   Seccao,

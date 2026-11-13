@@ -137,7 +137,13 @@ var Colaborador = sequelize.define("Colaborador", {
   },
   data_admissao: {
     type: DataTypes.DATEONLY,
+    allowNull: true,
+  },
+  // Rascunho: registo ainda por concluir (sem data de admissao, inactivo).
+  rascunho: {
+    type: DataTypes.BOOLEAN,
     allowNull: false,
+    defaultValue: false,
   },
   data_desligamento: {
     type: DataTypes.DATEONLY,

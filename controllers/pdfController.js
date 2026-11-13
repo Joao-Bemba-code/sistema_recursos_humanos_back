@@ -4,6 +4,7 @@ var fs = require("fs");
 var os = require("os");
 var { Vencimento, Pagamento, Colaborador, Contrato, Organizacao } = require("../models");
 var { listarPagamentosParaResumo } = require("./folhaSalarialController");
+var { listarChecklist } = require("./documentoController");
 
 var MESES = ["Janeiro","Fevereiro","Marco","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
@@ -979,6 +980,49 @@ exports.fichaColaborador = async function (req, res) {
           y += 14;
         }
       }
+    }
+
+    // Documentos: checklist com o estado da conferencia e as datas.
+    try {
+      var documentos = await listarChecklist(colab.id, colab.organizacao_id);
+      if (documentos.length > 0) {
+        if (y > doc.page.height - 150) { doc.addPage(); y = 50; }
+        y += 20;
+        doc.font("Helvetica-Bold").fontSize(12).fillColor("#333333");
+        doc.text("Documentos", ml, y); y += 18;
+        doc.font("Helvetica").fontSize(9).fillColor("#333333");
+
+        for (var di = 0; di < documentos.length; di++) {
+          var d = documentos[di];
+          if (y > doc.page.height - 70) { doc.addPage(); y = 50; }
+          var nomeDoc = d.categoria_label || d.categoria;
+          if (d.categoria === "outro" && d.tipo_documento) nomeDoc = d.tipo_documento;
+          doc.font("Helvetica-Bold").fillColor("#333333").text(normalizeForPdf(nomeDoc), ml, y, { width: 250 });
+          doc.font("Helvetica").fillColor(d.estado === "Validado" ? "#1a7f37" : d.estado === "A corrigir" ? "#b42318" : "#555555")
+            .text(d.estado || "Em falta", ml + 260, y);
+          y += 13;
+
+          var detalhe = [];
+          if (d.ficheiro_nome) detalhe.push(d.ficheiro_nome);
+          if (d.carregado_em) {
+            var dc = new Date(d.carregado_em);
+            detalhe.push("carregado em " + dc.getDate().toString().padStart(2, "0") + "/" + (dc.getMonth() + 1).toString().padStart(2, "0") + "/" + dc.getFullYear() + (d.carregado_por_nome ? " por " + d.carregado_por_nome : ""));
+          }
+          if (d.validado_em) {
+            var dv = new Date(d.validado_em);
+            detalhe.push("validado em " + dv.getDate().toString().padStart(2, "0") + "/" + (dv.getMonth() + 1).toString().padStart(2, "0") + "/" + dv.getFullYear() + (d.validado_por_nome ? " por " + d.validado_por_nome : ""));
+          }
+          if (d.estado === "A corrigir" && d.motivo_correcao) detalhe.push("motivo: " + d.motivo_correcao);
+
+          if (detalhe.length > 0) {
+            doc.font("Helvetica").fontSize(8).fillColor("#777777").text(normalizeForPdf(detalhe.join(" | ")), ml, y, { width: w });
+            y += 12;
+          }
+          y += 4;
+        }
+      }
+    } catch (eDocs) {
+      console.log("Aviso: documentos no PDF da ficha:", eDocs.message);
     }
 
     drawFooter(doc, org);
