@@ -31,6 +31,14 @@ var Aviso = sequelize.define("Aviso", {
     type: DataTypes.UUID,
     allowNull: true,
   },
+  cargo_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
+  colaborador_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
   data_inicio: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,

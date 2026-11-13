@@ -1,7 +1,7 @@
 var { Op } = require("sequelize");
 var { PedidoColaborador, Colaborador, Utilizador, Perfil, Notificacao, RegistoPresenca } = require("../models");
 var notificacaoController = require("./notificacaoController");
-var { guardarFicheiro, urlDoFicheiro, apagarFicheiroDeUrl } = require("../helpers/ficheiros");
+var { guardarFicheiro, urlDoFicheiro, apagarFicheiroDeUrl, responderComFicheiro } = require("../helpers/ficheiros");
 
 var list = async function (req, res) {
   try {
@@ -89,6 +89,46 @@ var getById = async function (req, res) {
   } catch (e) {
     console.log("Erro ao obter pedido:", e.message);
     return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+// Download do comprovativo anexado ao pedido. O administrador precisa de
+// guardar o documento no computador, nao apenas de o abrir no browser.
+// Um colaborador so descarrega os documentos dos seus proprios pedidos.
+var downloadDocumento = async function (req, res) {
+  try {
+    var pedido = await PedidoColaborador.findOne({
+      where: {
+        id: req.params.id,
+        organizacao_id: req.utilizador.organizacao_id,
+      },
+    });
+
+    if (!pedido) {
+      return res.status(404).json({ error: "Pedido nao encontrado" });
+    }
+    if (!pedido.documento) {
+      return res.status(404).json({ error: "Este pedido nao tem documento anexado" });
+    }
+
+    var perfilNome = req.utilizador.perfil ? req.utilizador.perfil.nome : "";
+    if (perfilNome === "Colaborador") {
+      var meuRegisto = await Colaborador.findOne({
+        where: { utilizador_id: req.utilizador.id, organizacao_id: req.utilizador.organizacao_id },
+        attributes: ["id"],
+      });
+      if (!meuRegisto || String(meuRegisto.id) !== String(pedido.colaborador_id)) {
+        return res.status(403).json({ error: "Sem permissao sobre este documento" });
+      }
+    }
+
+    var enviado = await responderComFicheiro(res, pedido.documento, "comprovativo-" + (pedido.tipo || "documento") + ".pdf");
+    if (!enviado) {
+      return res.status(404).json({ error: "Nao foi possivel obter o documento" });
+    }
+  } catch (e) {
+    console.log("Erro ao descarregar documento do pedido:", e.message);
+    return res.status(500).json({ error: "Erro ao descarregar o documento" });
   }
 };
 
@@ -230,6 +270,9 @@ var updateEstado = async function (req, res) {
           await registo.update({
             justificado: true,
             justificacao_observacoes: pedido.comentario || dadosJustificacao.tipo || null,
+            // O comprovativo anexado no pedido fica também no registo de
+            // presença, para o admin o ver na página de faltas ("Ver Doc").
+            documento_justificacao: pedido.documento || registo.documento_justificacao || null,
           });
           console.log("Falta justificada via pedido:", registo.id, "data:", registo.data);
         }
@@ -358,4 +401,4 @@ var remove = async function (req, res) {
   }
 };
 
-module.exports = { list, getById, create, updateEstado, getStats, remove };
+module.exports = { list, getById, create, updateEstado, getStats, remove, downloadDocumento };

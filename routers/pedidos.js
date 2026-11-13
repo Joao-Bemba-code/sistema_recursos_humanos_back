@@ -5,6 +5,7 @@ var { requireModulo } = require("../protect/rbac");
 
 router.get("/stats", controller.getStats);
 router.get("/", controller.list);
+router.get("/:id/documento", controller.downloadDocumento);
 router.get("/:id", controller.getById);
 router.post("/", controller.create);
 router.put("/:id/estado", requireModulo("pedidos", "update", "Administrador Geral", "Director Geral", "Director de Recursos Humanos"), controller.updateEstado);

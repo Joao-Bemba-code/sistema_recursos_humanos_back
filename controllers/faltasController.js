@@ -1,6 +1,6 @@
 var { Op } = require("sequelize");
 var { sequelize, RegistoPresenca, Colaborador } = require("../models");
-var { guardarFicheiro, urlDoFicheiro, apagarFicheiroDeUrl } = require("../helpers/ficheiros");
+var { guardarFicheiro, urlDoFicheiro, apagarFicheiroDeUrl, responderComFicheiro } = require("../helpers/ficheiros");
 
 // Uma falta fica "processada" (flag processada) quando a folha do mes que a
 // descontou e processada. Nao e preciso inferir a partir dos pagamentos.
@@ -249,6 +249,38 @@ var registros = async function (req, res) {
   }
 };
 
+// Download do comprovativo de uma falta/atraso justificado. O administrador
+// pode assim guardar o documento no computador, nao apenas abri-lo no browser.
+var downloadDocumento = async function (req, res) {
+  try {
+    var registo = await RegistoPresenca.findOne({
+      where: { id: req.params.id },
+      include: [
+        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo"], where: { organizacao_id: req.utilizador.organizacao_id } },
+      ],
+    });
+
+    if (!registo || !registo.colaborador) {
+      return res.status(404).json({ error: "Registo nao encontrado" });
+    }
+    if (!registo.documento_justificacao) {
+      return res.status(404).json({ error: "Este registo nao tem documento anexado" });
+    }
+
+    var enviado = await responderComFicheiro(
+      res,
+      registo.documento_justificacao,
+      "justificacao-" + (registo.colaborador.nome_completo || "documento").replace(/\s+/g, "-") + ".pdf"
+    );
+    if (!enviado) {
+      return res.status(404).json({ error: "Nao foi possivel obter o documento" });
+    }
+  } catch (e) {
+    console.log("Erro ao descarregar documento da justificacao:", e.message);
+    return res.status(500).json({ error: "Erro ao descarregar o documento" });
+  }
+};
+
 var justificar = async function (req, res) {
   try {
     var { id } = req.params;
@@ -343,4 +375,4 @@ var eliminar = async function (req, res) {
   }
 };
 
-module.exports = { resumo, registros, justificar, removerJustificacao, eliminar };
+module.exports = { resumo, registros, justificar, removerJustificacao, eliminar, downloadDocumento };

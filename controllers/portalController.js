@@ -173,11 +173,13 @@ var getPortalStats = async function (req, res) {
       });
     });
 
-    // Avaliacoes das tarefas: a nota e dada pelo gestor a ESTE colaborador
-    // (uma nota por colaborador, registada na sua atribuicao).
+    // Avaliacoes das tarefas: a nota e automatica (cumprimento do tempo) e
+    // fica registada na atribuicao do colaborador. So contam as alocacoes ja
+    // VALIDADAS - o trabalho terminado mas ainda por validar nao expoe nota.
     var alocacoesAvaliadas = await TarefaAlocacao.findAll({
       where: {
         colaborador_id: colaborador.id,
+        estado: "Validada",
         nota: { [Op.ne]: null },
       },
       include: [{

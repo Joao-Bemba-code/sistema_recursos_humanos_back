@@ -35,6 +35,7 @@ var pedidoRoutes = require("./routers/pedidos");
 var portalRoutes = require("./routers/portal");
 var faltasRoutes = require("./routers/faltas");
 var pdfRoutes = require("./routers/pdf");
+var excelRoutes = require("./routers/excel");
 var ocorrenciaRoutes = require("./routers/ocorrencias");
 var comunicacaoRoutes = require("./routers/comunicacoes");
 var creditoRoutes = require("./routers/creditos");
@@ -43,6 +44,7 @@ var feriadoRoutes = require("./routers/feriados");
 var escalaRoutes = require("./routers/escalas");
 var ficheiroRoutes = require("./routers/ficheiros");
 var tarefaRoutes = require("./routers/tarefas");
+var chatRoutes = require("./routers/chat");
 
 // CORREÇÃO: Importação protegida do módulo seed para evitar o crash MODULE_NOT_FOUND
 var seed = null;
@@ -131,6 +133,7 @@ app.use("/api/pedidos", authenticate, pedidoRoutes);
 app.use("/api/portal", authenticate, portalRoutes);
 app.use("/api/faltas", authenticate, faltasRoutes);
 app.use("/api/pdf", authenticate, pdfRoutes);
+app.use("/api/excel", authenticate, excelRoutes);
 app.use("/api/ocorrencias", authenticate, ocorrenciaRoutes);
 app.use("/api/comunicados", authenticate, comunicacaoRoutes);
 app.use("/api/creditos", authenticate, creditoRoutes);
@@ -139,6 +142,7 @@ app.use("/api/feriados", authenticate, feriadoRoutes);
 app.use("/api/escalas", authenticate, escalaRoutes);
 app.use("/api/ficheiros", ficheiroRoutes);
 app.use("/api/tarefas", authenticate, tarefaRoutes);
+app.use("/api/chat", authenticate, chatRoutes);
 
 // Health check
 app.get("/health", function (req, res) {

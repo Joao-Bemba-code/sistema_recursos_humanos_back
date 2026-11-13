@@ -49,7 +49,7 @@ var Tarefa = sequelize.define("Tarefa", {
     defaultValue: "Media",
   },
   estado: {
-    type: DataTypes.ENUM("Pendente", "Em_curso", "Atrasada", "Concluida", "Validada", "Cancelada"),
+    type: DataTypes.ENUM("Pendente", "Em_curso", "Atrasada", "Aguarda_Validacao", "Concluida", "Validada", "Cancelada"),
     allowNull: false,
     defaultValue: "Pendente",
   },
@@ -82,7 +82,7 @@ var Tarefa = sequelize.define("Tarefa", {
   nota: {
     type: DataTypes.DECIMAL(4, 2),
     allowNull: true,
-    comment: "Media das notas dadas pelo gestor as alocacoes validadas (0-20)",
+    comment: "Media das notas automaticas das alocacoes validadas (0-20)",
   },
   classificacao: {
     type: DataTypes.STRING(30),
@@ -121,11 +121,14 @@ var Tarefa = sequelize.define("Tarefa", {
 //   Em_curso     - iniciada; o progresso cresce sozinho com o tempo
 //   Reaberta     - devolvida pelo gestor para correccoes (corre como Em_curso)
 //   Justificativa- colaborador nao consegue fazer e motivou; decisao do gestor
-//   Atrasada     - janela terminou sem concluir; SEM avaliacao automatica -
-//                  fica pendente de decisao do gestor (reabrir, eliminar ou
-//                  avaliar manualmente, tendo em conta a justificativa)
-//   Concluida    - colaborador clicou "Terminar"; avaliacao automatica pela rapidez
-//   Validada     - avaliacao registada (automatica ou revalidada pelo gestor)
+//   Atrasada     - janela terminou sem concluir; sem nota publicada - fica
+//                  pendente de decisao do gestor (reabrir/eliminar) ou de
+//                  validacao do administrador (nota automatica 5, fora do prazo)
+//   Aguarda_Validacao - colaborador clicou "Terminar"; a nota automatica ja
+//                  esta calculada mas so e publicada depois da validacao
+//   Concluida    - estado legado (equivale a Aguarda_Validacao)
+//   Validada     - o administrador confirmou a conclusao; nota automatica
+//                  (cumprimento do tempo) publicada
 //   Cancelada    - aceite a justificativa / removida pelo gestor (sem penalizacao)
 var TarefaAlocacao = sequelize.define("TarefaAlocacao", {
   id: {
@@ -156,7 +159,7 @@ var TarefaAlocacao = sequelize.define("TarefaAlocacao", {
     comment: "O que este colaborador deve fazer dentro da tarefa (subtarefa)",
   },
   estado: {
-    type: DataTypes.ENUM("Pendente", "Em_curso", "Reaberta", "Justificativa", "Atrasada", "Concluida", "Validada", "Cancelada"),
+    type: DataTypes.ENUM("Pendente", "Em_curso", "Reaberta", "Justificativa", "Atrasada", "Aguarda_Validacao", "Concluida", "Validada", "Cancelada"),
     allowNull: false,
     defaultValue: "Pendente",
   },
@@ -203,7 +206,7 @@ var TarefaAlocacao = sequelize.define("TarefaAlocacao", {
   nota: {
     type: DataTypes.DECIMAL(4, 2),
     allowNull: true,
-    comment: "Nota final 0-20 = media dos indicadores (desempenho, produtividade, cumprimento do prazo)",
+    comment: "Nota automatica 0-20 pelo cumprimento do tempo dentro da janela",
   },
   desempenho: {
     type: DataTypes.DECIMAL(4, 2),
@@ -227,7 +230,7 @@ var TarefaAlocacao = sequelize.define("TarefaAlocacao", {
   observacoes: {
     type: DataTypes.TEXT,
     allowNull: true,
-    comment: "Observacoes do gestor para este colaborador",
+    comment: "Observacoes do administrador na validacao",
   },
   avaliado_por: {
     type: DataTypes.UUID,

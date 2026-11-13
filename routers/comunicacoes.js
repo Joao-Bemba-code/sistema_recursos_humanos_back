@@ -9,6 +9,7 @@ var ROLES_GESTAO = ["Administrador Geral", "Director Geral", "Director de Recurs
 // organizacao e visibilidade). Gestao via matriz de permissoes ("comunicados")
 // + perfis classicos como alternativa.
 router.get("/", controller.list);
+router.get("/destinatarios", controller.destinatarios);
 router.get("/:id", controller.get);
 router.get("/:id/anexos/:anexoId", controller.downloadAnexo);
 router.post("/", requireModuloOuRole("comunicados", "create", "Administrador Geral", "Director Geral", "Director de Recursos Humanos", "Técnico de RH"), controller.create);

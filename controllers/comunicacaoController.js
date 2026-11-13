@@ -1,5 +1,5 @@
 var { Op } = require("sequelize");
-var { Aviso, ComunicacaoAnexo, Utilizador, Colaborador, Departamento } = require("../models");
+var { Aviso, ComunicacaoAnexo, Utilizador, Colaborador, Departamento, Cargo } = require("../models");
 var { perfisUtilizador, fundirPermissoes } = require("../protect/rbac");
 
 // Limites dos anexos (guardados na BD em base64): ate 8 ficheiros, cada um
@@ -27,8 +27,33 @@ var isGestor = function (req) {
 var incluirAnexos = [
   { model: Utilizador, as: "criador", attributes: ["id", "nome_completo", "email"] },
   { model: Departamento, as: "departamento", attributes: ["id", "nome"] },
+  { model: Cargo, as: "cargo", attributes: ["id", "nome"] },
+  { model: Colaborador, as: "colaborador_destino", attributes: ["id", "nome_completo", "nome_curto"] },
   { model: ComunicacaoAnexo, as: "anexos", attributes: ["id", "nome", "tipo", "tamanho", "createdAt"] },
 ];
+
+// Limpa os campos de destinatario conforme o visivel_para escolhido, para
+// nunca ficarem alvos pendurados de uma opcao anterior.
+var limparDestinatarios = function (dados, visivelPara) {
+  if (visivelPara !== "Departamento") dados.departamento_id = null;
+  if (visivelPara !== "Cargo") dados.cargo_id = null;
+  if (visivelPara !== "Perfil") dados.colaborador_id = null;
+  return dados;
+};
+
+// Valida que a opcao escolhida tem o alvo preenchido.
+var validarDestino = function (visivelPara, dados) {
+  if (visivelPara === "Departamento" && !dados.departamento_id) {
+    return "Indique o departamento de destino";
+  }
+  if (visivelPara === "Cargo" && !dados.cargo_id) {
+    return "Indique o cargo de destino";
+  }
+  if (visivelPara === "Perfil" && !dados.colaborador_id) {
+    return "Indique o colaborador de destino";
+  }
+  return null;
+};
 
 // Normaliza "dados" (pode vir como data URI "data:...;base64,XXXX" ou base64 puro)
 var extrairBase64 = function (dados) {
@@ -60,6 +85,70 @@ var criarAnexos = async function (comunicadoId, anexos) {
   return criados;
 };
 
+// Opcoes de destinatarios para o formulario de comunicados: colaboradores
+// activos (com cargo e departamento), cargos (com os departamentos onde ha
+// colaboradores com esse cargo) e departamentos da organizacao.
+var destinatarios = async function (req, res) {
+  try {
+    var orgId = req.utilizador.organizacao_id;
+
+    var colaboradores = await Colaborador.findAll({
+      where: { organizacao_id: orgId, estado: "Activo" },
+      attributes: ["id", "nome_completo", "nome_curto", "cargo_id", "departamento_id"],
+      include: [
+        { model: Cargo, as: "cargo", attributes: ["id", "nome"] },
+        { model: Departamento, as: "departamento", attributes: ["id", "nome"] },
+      ],
+      order: [["nome_completo", "ASC"]],
+    });
+
+    var cargos = await Cargo.findAll({
+      attributes: ["id", "nome"],
+      where: { activo: true },
+      order: [["nome", "ASC"]],
+    });
+
+    // Departamentos onde ha colaboradores com cada cargo (para mostrar ao lado
+    // do nome do cargo: "Cargo — Departamento").
+    var deptsPorCargo = {};
+    colaboradores.forEach(function (c) {
+      if (!c.cargo_id || !c.departamento_id) return;
+      if (!deptsPorCargo[c.cargo_id]) deptsPorCargo[c.cargo_id] = {};
+      if (c.departamento) deptsPorCargo[c.cargo_id][c.departamento_id] = c.departamento.nome;
+    });
+
+    var departamentos = await Departamento.findAll({
+      where: { organizacao_id: orgId },
+      attributes: ["id", "nome"],
+      order: [["nome", "ASC"]],
+    });
+
+    return res.status(200).json({
+      colaboradores: colaboradores.map(function (c) {
+        return {
+          id: c.id,
+          nome: c.nome_completo || c.nome_curto || "",
+          cargo: c.cargo ? c.cargo.nome : "",
+          departamento: c.departamento ? c.departamento.nome : "",
+        };
+      }),
+      cargos: cargos.map(function (cg) {
+        var nomes = [];
+        if (deptsPorCargo[cg.id]) {
+          Object.keys(deptsPorCargo[cg.id]).forEach(function (k) {
+            if (deptsPorCargo[cg.id][k]) nomes.push(deptsPorCargo[cg.id][k]);
+          });
+        }
+        return { id: cg.id, nome: cg.nome, departamentos: nomes };
+      }),
+      departamentos: departamentos,
+    });
+  } catch (e) {
+    console.log("Erro ao listar destinatarios:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
 var list = async function (req, res) {
   try {
     var page = parseInt(req.query.page) || 1;
@@ -76,11 +165,38 @@ var list = async function (req, res) {
 
     if (!gestor) {
       where.publicado = true;
+      where[Op.and] = where[Op.and] || [];
+
+      // Janela de validade (sem data de fim = sempre visivel)
       var dataActual = new Date();
-      where[Op.or] = [
-        { data_fim: null },
-        { data_fim: { [Op.gte]: dataActual } },
+      where[Op.and].push({
+        [Op.or]: [
+          { data_fim: null },
+          { data_fim: { [Op.gte]: dataActual } },
+        ],
+      });
+
+      // Visibilidade: so aparecem os comunicados "Todos" e os destinados ao
+      // departamento/cargo/perfil do colaborador que esta a ver. Comunicados
+      // antigos com destino escolhido mas sem alvo definido ficam visiveis
+      // para todos (nunca desaparecem).
+      var meuColab = await Colaborador.findOne({
+        where: { utilizador_id: req.utilizador.id, organizacao_id: req.utilizador.organizacao_id },
+      });
+      var alternativas = [
+        { visivel_para: "Todos" },
+        { visivel_para: { [Op.in]: ["Departamento", "Cargo", "Perfil"] }, departamento_id: null, cargo_id: null, colaborador_id: null },
       ];
+      if (meuColab) {
+        if (meuColab.departamento_id) {
+          alternativas.push({ visivel_para: "Departamento", departamento_id: meuColab.departamento_id });
+        }
+        if (meuColab.cargo_id) {
+          alternativas.push({ visivel_para: "Cargo", cargo_id: meuColab.cargo_id });
+        }
+        alternativas.push({ visivel_para: "Perfil", colaborador_id: meuColab.id });
+      }
+      where[Op.and].push({ [Op.or]: alternativas });
     } else {
       if (publicado !== undefined) {
         where.publicado = publicado === "true" || publicado === "1";
@@ -166,6 +282,12 @@ var create = async function (req, res) {
       if (k !== "anexos") payload[k] = dados[k];
     });
 
+    payload = limparDestinatarios(payload, payload.visivel_para || "Todos");
+    var erroDestino = validarDestino(payload.visivel_para || "Todos", payload);
+    if (erroDestino) {
+      return res.status(400).json({ error: erroDestino });
+    }
+
     payload.organizacao_id = req.utilizador.organizacao_id;
     payload.criado_por = req.utilizador.id;
 
@@ -206,6 +328,18 @@ var update = async function (req, res) {
       if (camposProtegidos.indexOf(keys[i]) === -1) {
         dadosActualizar[keys[i]] = req.body[keys[i]];
       }
+    }
+
+    // Limpa/valida os destinatarios conforme a opcao final (a nova ou a que
+    // ja estava no registo).
+    var visivelFinal = dadosActualizar.visivel_para || aviso.visivel_para || "Todos";
+    dadosActualizar = limparDestinatarios(dadosActualizar, visivelFinal);
+    var erroDestino = validarDestino(visivelFinal, Object.assign(
+      { departamento_id: aviso.departamento_id, cargo_id: aviso.cargo_id, colaborador_id: aviso.colaborador_id },
+      dadosActualizar
+    ));
+    if (erroDestino) {
+      return res.status(400).json({ error: erroDestino });
     }
 
     await aviso.update(dadosActualizar);
@@ -316,4 +450,4 @@ var downloadAnexo = async function (req, res) {
   }
 };
 
-module.exports = { list, get, create, update, remove, togglePublicado, downloadAnexo };
+module.exports = { list, get, create, update, remove, togglePublicado, downloadAnexo, destinatarios };

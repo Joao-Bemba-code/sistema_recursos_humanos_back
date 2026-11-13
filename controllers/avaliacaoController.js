@@ -1,5 +1,5 @@
 var { Op } = require("sequelize");
-var { CicloAvaliacao, AvaliacaoDesempenho, Colaborador, Utilizador } = require("../models");
+var { CicloAvaliacao, AvaliacaoDesempenho, Colaborador, Utilizador, TarefaAlocacao } = require("../models");
 var notificacaoController = require("./notificacaoController");
 
 // ==================== CICLOS ====================
@@ -141,6 +141,100 @@ var calcularClassificacao = function (notaFinal) {
   return "Mau";
 };
 
+// ==================== NOTAS AUTOMATICAS (a partir das tarefas) ====================
+
+// As notas da avaliacao sao automaticas, calculadas a partir das tarefas
+// validadas do colaborador dentro do periodo do ciclo:
+//   - nota tecnica        = media das notas automaticas das tarefas validadas
+//   - nota comportamental = pontualidade (20 x tarefas dentro do prazo / total)
+//   - nota final          = media das duas
+// O administrador apenas comenta e valida; nao escreve notas.
+var calcularAutoNotas = async function (colaboradorId, ciclo, organizacaoId) {
+  var inicio = new Date(ciclo.data_inicio + "T00:00:00");
+  var fim = new Date(ciclo.data_fim + "T23:59:59");
+
+  var alocacoes = await TarefaAlocacao.findAll({
+    where: {
+      organizacao_id: organizacaoId,
+      colaborador_id: colaboradorId,
+      estado: "Validada",
+      janela_fim: { [Op.between]: [inicio, fim] },
+    },
+    order: [["janela_fim", "ASC"]],
+  });
+
+  var total = alocacoes.length;
+  var dentroPrazo = 0;
+  var soma = 0;
+  var comNota = 0;
+
+  alocacoes.forEach(function (a) {
+    var nota = a.nota !== null && a.nota !== undefined ? parseFloat(a.nota) : null;
+    if (nota !== null && !isNaN(nota)) {
+      soma += nota;
+      comNota++;
+      // Nota >= 12 significa que terminou dentro da janela (12/16/20);
+      // nota 5 e entregue no/fora do prazo.
+      if (nota >= 12) dentroPrazo++;
+    }
+  });
+
+  var calculo = {
+    total_tarefas: total,
+    dentro_prazo: dentroPrazo,
+    nota_tecnica: null,
+    nota_comportamental: null,
+    nota_final: null,
+    classificacao: null,
+  };
+
+  if (comNota > 0) {
+    calculo.nota_tecnica = Math.round((soma / comNota) * 100) / 100;
+  }
+  if (total > 0) {
+    calculo.nota_comportamental = Math.round((20 * dentroPrazo / total) * 100) / 100;
+  }
+  if (calculo.nota_tecnica !== null && calculo.nota_comportamental !== null) {
+    calculo.nota_final = Math.round(((calculo.nota_tecnica + calculo.nota_comportamental) / 2) * 100) / 100;
+    calculo.classificacao = calcularClassificacao(calculo.nota_final);
+  }
+
+  return calculo;
+};
+
+// Devolve as notas automaticas de um colaborador num ciclo (o ecra de
+// avaliacao mostra este painel ao administrador antes de guardar).
+var autoCalculo = async function (req, res) {
+  try {
+    var colaboradorId = req.query.colaborador_id;
+    var cicloId = req.query.ciclo_id;
+    if (!colaboradorId) {
+      return res.status(400).json({ error: "colaborador_id e obrigatorio" });
+    }
+    if (!cicloId) {
+      return res.status(400).json({ error: "ciclo_id e obrigatorio" });
+    }
+
+    var ciclo = await CicloAvaliacao.findByPk(cicloId);
+    if (!ciclo) {
+      return res.status(404).json({ error: "Ciclo de avaliacao nao encontrado" });
+    }
+
+    var colaborador = await Colaborador.findOne({
+      where: { id: colaboradorId, organizacao_id: req.utilizador.organizacao_id },
+    });
+    if (!colaborador) {
+      return res.status(404).json({ error: "Colaborador nao encontrado" });
+    }
+
+    var calculo = await calcularAutoNotas(colaboradorId, ciclo, req.utilizador.organizacao_id);
+    return res.status(200).json({ dados: calculo });
+  } catch (e) {
+    console.log("Erro no calculo automatico da avaliacao:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
 var listAvaliacoes = async function (req, res) {
   try {
     var page = parseInt(req.query.page) || 1;
@@ -203,10 +297,25 @@ var createAvaliacao = async function (req, res) {
       return res.status(400).json({ error: "ciclo_id e obrigatorio" });
     }
 
-    if (dados.nota_tecnica !== undefined && dados.nota_comportamental !== undefined) {
-      dados.nota_final = (parseFloat(dados.nota_tecnica) + parseFloat(dados.nota_comportamental)) / 2;
-      dados.classificacao = calcularClassificacao(dados.nota_final);
+    var ciclo = await CicloAvaliacao.findByPk(dados.ciclo_id);
+    if (!ciclo) {
+      return res.status(400).json({ error: "Ciclo de avaliacao nao encontrado" });
     }
+
+    var colaboradorExiste = await Colaborador.findOne({
+      where: { id: dados.colaborador_id, organizacao_id: req.utilizador.organizacao_id },
+    });
+    if (!colaboradorExiste) {
+      return res.status(404).json({ error: "Colaborador nao encontrado" });
+    }
+
+    // As notas sao automaticas, a partir das tarefas validadas no periodo do
+    // ciclo. O que vier do cliente e ignorado.
+    var calculo = await calcularAutoNotas(dados.colaborador_id, ciclo, req.utilizador.organizacao_id);
+    dados.nota_tecnica = calculo.nota_tecnica;
+    dados.nota_comportamental = calculo.nota_comportamental;
+    dados.nota_final = calculo.nota_final;
+    dados.classificacao = calculo.classificacao;
 
     var avaliacao = await AvaliacaoDesempenho.create(dados);
 
@@ -246,7 +355,7 @@ var updateAvaliacao = async function (req, res) {
       return res.status(404).json({ error: "Avaliacao de desempenho nao encontrada" });
     }
 
-    var camposProtegidos = ["id", "colaborador_id", "ciclo_id", "createdAt", "updatedAt"];
+    var camposProtegidos = ["id", "colaborador_id", "ciclo_id", "createdAt", "updatedAt", "nota_tecnica", "nota_comportamental", "nota_final", "classificacao"];
     var dadosActualizar = {};
 
     var keys = Object.keys(req.body);
@@ -256,12 +365,15 @@ var updateAvaliacao = async function (req, res) {
       }
     }
 
-    var notaTecnica = dadosActualizar.nota_tecnica !== undefined ? parseFloat(dadosActualizar.nota_tecnica) : (avaliacao.nota_tecnica ? parseFloat(avaliacao.nota_tecnica) : null);
-    var notaComportamental = dadosActualizar.nota_comportamental !== undefined ? parseFloat(dadosActualizar.nota_comportamental) : (avaliacao.nota_comportamental ? parseFloat(avaliacao.nota_comportamental) : null);
-
-    if (notaTecnica !== null && notaComportamental !== null) {
-      dadosActualizar.nota_final = Math.round(((notaTecnica + notaComportamental) / 2) * 100) / 100;
-      dadosActualizar.classificacao = calcularClassificacao(dadosActualizar.nota_final);
+    // As notas sao automaticas: recalculadas a partir das tarefas validadas
+    // no periodo do ciclo. O cliente nao as pode alterar.
+    var ciclo = await CicloAvaliacao.findByPk(avaliacao.ciclo_id);
+    if (ciclo) {
+      var calculo = await calcularAutoNotas(avaliacao.colaborador_id, ciclo, req.utilizador.organizacao_id);
+      dadosActualizar.nota_tecnica = calculo.nota_tecnica;
+      dadosActualizar.nota_comportamental = calculo.nota_comportamental;
+      dadosActualizar.nota_final = calculo.nota_final;
+      dadosActualizar.classificacao = calculo.classificacao;
     }
 
     await avaliacao.update(dadosActualizar);
@@ -304,4 +416,4 @@ var updateAvaliacao = async function (req, res) {
   }
 };
 
-module.exports = { listCiclos, getCiclo, createCiclo, updateCiclo, removeCiclo, listAvaliacoes, createAvaliacao, updateAvaliacao };
+module.exports = { listCiclos, getCiclo, createCiclo, updateCiclo, removeCiclo, listAvaliacoes, createAvaliacao, updateAvaliacao, autoCalculo };

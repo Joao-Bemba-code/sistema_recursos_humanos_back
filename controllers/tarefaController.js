@@ -5,12 +5,16 @@ var {
   TarefaAlocacao,
   Colaborador,
   Utilizador,
+  Perfil,
 } = require("../models");
 var notificacaoController = require("./notificacaoController");
 var { perfisUtilizador, fundirPermissoes } = require("../protect/rbac");
 
-var ESTADOS = ["Pendente", "Em_curso", "Atrasada", "Concluida", "Validada", "Cancelada"];
-var ESTADOS_ALOCACAO = ["Pendente", "Em_curso", "Reaberta", "Justificativa", "Atrasada", "Concluida", "Validada", "Cancelada"];
+var ESTADOS = ["Pendente", "Em_curso", "Atrasada", "Aguarda_Validacao", "Concluida", "Validada", "Cancelada"];
+var ESTADOS_ALOCACAO = ["Pendente", "Em_curso", "Reaberta", "Justificativa", "Atrasada", "Aguarda_Validacao", "Concluida", "Validada", "Cancelada"];
+// Estados em que o colaborador terminou e o trabalho espera confirmacao do
+// administrador. "Concluida" fica aqui por compatibilidade com registos antigos.
+var ESTADOS_POR_VALIDAR = ["Aguarda_Validacao", "Concluida"];
 // Estados em que a janela ainda esta a contar para o colaborador
 var ESTADOS_EM_JANELA = ["Pendente", "Em_curso", "Reaberta"];
 var PRIORIDADES = ["Baixa", "Media", "Alta", "Urgente"];
@@ -38,6 +42,21 @@ function ehGestorTarefas(utilizador) {
   });
 }
 
+// So o administrador confirma que o trabalho esta realmente concluido.
+// Gestores (nivel 2/3) podem reabrir, cancelar e gerir, mas nao validar.
+function ehAdministradorTarefas(utilizador) {
+  if (!utilizador) return false;
+  var perfis = perfisUtilizador(utilizador);
+  var fundido = fundirPermissoes(perfis);
+  if (fundido.nivel >= 4) return true;
+  return perfis.some(function (p) {
+    if (!p) return false;
+    var nome = String(p.nome || "").toLowerCase().trim();
+    return nome === "administrador geral" || nome === "administrador" ||
+      nome === "super admin" || nome === "super administrador";
+  });
+}
+
 function pad2(n) {
   return (n < 10 ? "0" : "") + n;
 }
@@ -48,6 +67,40 @@ function classificarNota(nota) {
   if (nota >= 10) return "Suficiente";
   if (nota >= 5) return "Insuficiente";
   return "Mau";
+}
+
+// ==================== NOTA AUTOMATICA (cumprimento do tempo) ====================
+
+// A nota e sempre automatica, com base no tempo de cumprimento da janela:
+// - terminou na 1a metade -> 20
+// - terminou na 2a metade -> 16
+// - terminou nos ultimos 10% -> 12
+// - terminou no/fora do prazo -> 5
+// O administrador apenas confirma se o trabalho esta concluido; nao atribui nota.
+function notaAutomatica(aloc, referencia) {
+  var inicio = new Date(aloc.janela_inicio).getTime();
+  var fim = new Date(aloc.janela_fim).getTime();
+  var t = (referencia ? new Date(referencia) : new Date()).getTime();
+  if (isNaN(inicio) || isNaN(fim) || fim <= inicio || isNaN(t)) return 16;
+  if (t >= fim) return 5;
+  var razao = Math.max(0, t - inicio) / (fim - inicio);
+  if (razao <= 0.5) return 20;
+  if (razao <= 0.9) return 16;
+  return 12;
+}
+
+// Preenche os indicadores com a nota automatica. avaliado_por fica null para
+// marcar que a nota foi calculada pelo sistema (nao por uma pessoa).
+function aplicarNotaAutomatica(aloc, referencia) {
+  var nota = notaAutomatica(aloc, referencia);
+  aloc.nota = nota;
+  aloc.desempenho = nota;
+  aloc.produtividade = nota;
+  aloc.cumprimento_prazo = nota;
+  aloc.classificacao = classificarNota(nota);
+  aloc.avaliado_por = null;
+  aloc.avaliado_em = referencia ? new Date(referencia) : new Date();
+  return nota;
 }
 
 // Aceita "AAAA-MM-DDTHH:MM", "AAAA-MM-DD HH:MM" ou ISO completo.
@@ -83,7 +136,7 @@ function calcularProgresso(aloc, agora) {
   if (estado === "Cancelada") {
     return Math.max(0, Math.min(100, aloc.progresso || 0));
   }
-  if (estado === "Concluida" || estado === "Validada" || estado === "Atrasada") return 100;
+  if (estado === "Concluida" || estado === "Aguarda_Validacao" || estado === "Validada" || estado === "Atrasada") return 100;
   if (estado === "Pendente") return 0;
   var inicio = new Date(aloc.janela_inicio).getTime();
   var fim = new Date(aloc.janela_fim).getTime();
@@ -100,41 +153,7 @@ function estaAtrasada(aloc, agora) {
   return new Date(aloc.janela_fim).getTime() < (agora || new Date()).getTime();
 }
 
-// ==================== AVALIACAO AUTOMATICA ====================
-
-// Escala de rapidez escolhida pelo utilizador (2026-10-07). Aplica-se
-// quando o colaborador CLICA EM TERMINAR (se nunca terminar, a alocacao
-// fica "Atrasada" sem nota e o gestor decide):
-// - concluiu na 1a metade da janela -> 20
-// - concluiu na 2a metade -> 16
-// - concluiu nos ultimos 10% do prazo -> 12
-// - concluiu depois do prazo (atrasada) -> 5
-function notaAutomatica(aloc, agora) {
-  var inicio = new Date(aloc.janela_inicio).getTime();
-  var fim = new Date(aloc.janela_fim).getTime();
-  if (isNaN(inicio) || isNaN(fim) || fim <= inicio) return 16;
-  var t = (agora || new Date()).getTime();
-  if (t >= fim) return 5; // terminou no fim/fora do prazo: conta como atrasada
-  var razao = Math.max(0, t - inicio) / (fim - inicio);
-  if (razao <= 0.5) return 20;
-  if (razao <= 0.9) return 16;
-  return 12;
-}
-
-// Preenche os tres indicadores com a nota automatica (avaliado_por = null
-// marca a avaliacao como feita pelo sistema; o gestor pode revalidar).
-async function avaliarAutomaticamente(aloc, agora) {
-  var nota = notaAutomatica(aloc, agora);
-  aloc.nota = nota;
-  aloc.desempenho = nota;
-  aloc.produtividade = nota;
-  aloc.cumprimento_prazo = nota;
-  aloc.classificacao = classificarNota(nota);
-  aloc.avaliado_por = null;
-  aloc.avaliado_em = agora || new Date();
-  await aloc.save();
-  return nota;
-}
+// ==================== ESTADO DA TAREFA ====================
 
 // Estado da TAREFA derivado das suas alocacoes.
 function derivarEstadoTarefa(alocacoes) {
@@ -145,13 +164,14 @@ function derivarEstadoTarefa(alocacoes) {
   if (tem(["Pendente", "Em_curso", "Reaberta", "Justificativa"])) {
     // Ha trabalho vivo: Pendente puro so se NADA mais aconteceu na tarefa.
     var algumaAvancada = alocacoes.some(function (a) {
-      return ["Em_curso", "Reaberta", "Justificativa", "Atrasada", "Concluida", "Validada"].indexOf(a.estado) !== -1;
+      return ["Em_curso", "Reaberta", "Justificativa", "Atrasada", "Aguarda_Validacao", "Concluida", "Validada"].indexOf(a.estado) !== -1;
     });
     return algumaAvancada ? "Em_curso" : "Pendente";
   }
-  // Nada vivo: as avaliacoes automaticas ja estao registadas.
+  // Nada vivo: as alocacoes terminadas pelo colaborador aguardam a
+  // confirmacao do administrador (as antigas "Concluida" contam como tal).
   if (tem(["Atrasada"])) return "Atrasada";
-  if (tem(["Concluida"])) return "Concluida";
+  if (tem(ESTADOS_POR_VALIDAR)) return "Aguarda_Validacao";
   if (tem(["Validada"])) return "Validada";
   return "Cancelada";
 }
@@ -196,6 +216,27 @@ async function notificar(req, utilizadorId, titulo, mensagem, tipo) {
 async function notificarGestor(req, tarefa, titulo, mensagem, tipo) {
   if (!tarefa.atribuido_por || String(tarefa.atribuido_por) === String(req.utilizador.id)) return;
   await notificar(req, tarefa.atribuido_por, titulo, mensagem, tipo);
+}
+
+// Avisa todos os administradores da organizacao de que ha trabalho a validar.
+async function notificarAdministradores(req, tarefa, titulo, mensagem, tipo) {
+  try {
+    var utilizadores = await Utilizador.findAll({
+      where: { organizacao_id: req.utilizador.organizacao_id, activo: true },
+      attributes: ["id", "nome_completo", "perfil_id"],
+      include: [
+        { model: Perfil, as: "perfil", attributes: ["id", "nome", "nivel", "permissoes"] },
+        { model: Perfil, as: "perfis_extra", attributes: ["id", "nome", "nivel", "permissoes"], through: { attributes: [] } },
+      ],
+    });
+    for (var i = 0; i < utilizadores.length; i++) {
+      if (!ehAdministradorTarefas(utilizadores[i])) continue;
+      if (String(utilizadores[i].id) === String(req.utilizador.id)) continue;
+      await notificar(req, utilizadores[i].id, titulo, mensagem, tipo);
+    }
+  } catch (e) {
+    console.log("Aviso: notificacao aos administradores nao enviada:", e.message);
+  }
 }
 
 function includeColaborador() {
@@ -269,7 +310,7 @@ async function aplicarDerivados(tarefa, alocacoes, req) {
     if (parseFloat(tarefa.nota || 0) !== mediaNota) alteracoes.nota = mediaNota;
     var classificacao = classificarNota(mediaNota);
     if (tarefa.classificacao !== classificacao) alteracoes.classificacao = classificacao;
-    var detalhes = "Media de " + avaliadas.length + " colaborador(es) avaliado(s) pelo gestor";
+    var detalhes = "Media de " + avaliadas.length + " colaborador(es) validado(s) - nota automatica pelo cumprimento do tempo";
     if (tarefa.avaliacao_detalhes !== detalhes) alteracoes.avaliacao_detalhes = detalhes;
   } else if (tarefa.nota !== null && tarefa.nota !== undefined) {
     alteracoes.nota = null;
@@ -301,15 +342,11 @@ async function aplicarDerivados(tarefa, alocacoes, req) {
     await tarefa.update(alteracoes);
 
     if (req && alteracoes.estado && alteracoes.estado !== estadoAnterior) {
-      if (alteracoes.estado === "Concluida") {
+      if (alteracoes.estado === "Aguarda_Validacao") {
         await registrarEvento(
-          tarefa.id, null, "concluida",
-          "Tarefa concluida - avaliacao automatica registada",
+          tarefa.id, null, "aguarda_validacao",
+          "Trabalho terminado - aguarda validacao do administrador",
           { estado_anterior: estadoAnterior }
-        );
-        await notificarGestor(
-          req, tarefa, "Tarefa Concluida",
-          "A tarefa '" + tarefa.titulo + "' foi concluida e a avaliacao automatica foi registada", "success"
         );
       } else if (alteracoes.estado === "Atrasada") {
         await registrarEvento(
@@ -319,12 +356,12 @@ async function aplicarDerivados(tarefa, alocacoes, req) {
         );
         await notificarGestor(
           req, tarefa, "Tarefa Atrasada",
-          "A tarefa '" + tarefa.titulo + "' nao foi concluida dentro da janela - reabra, elimine ou avalie manualmente", "warning"
+          "A tarefa '" + tarefa.titulo + "' nao foi concluida dentro da janela - reabra, elimine ou valide manualmente", "warning"
         );
       } else if (alteracoes.estado === "Validada") {
         await registrarEvento(
           tarefa.id, null, "validada",
-          "Tarefa validada - todas as avaliacoes finais estao registadas",
+          "Tarefa validada - notas automaticas publicadas",
           { estado_anterior: estadoAnterior }
         );
       } else if (alteracoes.estado === "Cancelada") {
@@ -349,9 +386,10 @@ async function derivarTarefa(tarefaId, req, instancia) {
   return aplicarDerivados(tarefa, alocacoes, req);
 }
 
-// Fecha as alocacoes cuja janela ja terminou: ficam "Atrasada" SEM avaliacao
-// automatica - o colaborador pode justificar e o gestor decide (reabrir,
-// eliminar ou avaliar manualmente). Inclui as Pendente que nunca iniciaram.
+// Fecha as alocacoes cuja janela ja terminou: ficam "Atrasada" sem nota
+// publicada - o colaborador pode justificar e o gestor decide (reabrir ou
+// eliminar) ou o administrador valida (nota automatica 5, fora do prazo).
+// Inclui as Pendente que nunca iniciaram.
 // Chamado no inicio das leituras - e o "relógio" do sistema.
 async function sincronizarJanelas(organizacaoId, req) {
   var agora = new Date();
@@ -377,7 +415,7 @@ async function sincronizarJanelas(organizacaoId, req) {
     await registrarEvento(
       aloc.tarefa_id, null, "atrasada",
       "Atribuicao de " + nome + " ficou atrasada (janela terminou sem conclusao) - " +
-        "sem avaliacao; aguarda decisao do gestor",
+        "sem nota publicada; aguarda decisao do gestor",
       { alocacao_id: aloc.id }
     );
     tarefasAfetadas[aloc.tarefa_id] = true;
@@ -393,13 +431,23 @@ async function sincronizarJanelas(organizacaoId, req) {
 // Valores calculados no momento da resposta (a barra nunca "congela"
 // entre duas leituras). O "atrasada" e calculado pelo cliente a partir da
 // janela - evita guardar campos derivados na resposta.
-function decorarResposta(tarefa, agora) {
+function decorarResposta(tarefa, agora, opcoes) {
   agora = agora || new Date();
+  var verNotasPendentes = !!(opcoes && opcoes.verNotasPendentes);
   var alocacoes = tarefa.alocacoes || [];
   var soma = 0;
   var activas = 0;
   alocacoes.forEach(function (a) {
     a.progresso = calcularProgresso(a, agora);
+    // A nota automatica so e publicada depois da validacao do administrador.
+    // Ate lá fica oculta, excepto para gestores/administradores.
+    if (a.estado !== "Validada" && !verNotasPendentes) {
+      a.nota = null;
+      a.desempenho = null;
+      a.produtividade = null;
+      a.cumprimento_prazo = null;
+      a.classificacao = null;
+    }
     // DECIMAL volta como texto do MySQL - normaliza para numero na resposta.
     if (a.nota !== null && a.nota !== undefined) a.nota = parseFloat(a.nota);
     if (a.desempenho !== null && a.desempenho !== undefined) a.desempenho = parseFloat(a.desempenho);
@@ -411,7 +459,17 @@ function decorarResposta(tarefa, agora) {
     }
   });
   if (activas > 0) tarefa.progresso = Math.round(soma / activas);
-  if (tarefa.nota !== null && tarefa.nota !== undefined) tarefa.nota = parseFloat(tarefa.nota);
+  // A nota da tarefa so aparece quando ha pelo menos uma alocacao validada
+  // pelo administrador. Trabalho terminado mas por validar nao expoe nota.
+  var temValidada = alocacoes.some(function (a) {
+    return a.estado === "Validada" && a.nota !== null && a.nota !== undefined;
+  });
+  if (!temValidada) {
+    tarefa.nota = null;
+    tarefa.classificacao = null;
+  } else if (tarefa.nota !== null && tarefa.nota !== undefined) {
+    tarefa.nota = parseFloat(tarefa.nota);
+  }
   return tarefa;
 }
 
@@ -581,7 +639,10 @@ var list = async function (req, res) {
     });
 
     var agora = new Date();
-    resultado.rows.forEach(function (t) { decorarResposta(t, agora); });
+    var verNotasPendentes = gestor;
+    resultado.rows.forEach(function (t) {
+      decorarResposta(t, agora, { verNotasPendentes: verNotasPendentes });
+    });
 
     return res.status(200).json({
       dados: resultado.rows,
@@ -642,9 +703,9 @@ var estatisticas = async function (req, res) {
       somaProgresso += t.progresso || 0;
 
       if (meuId) {
-        // Visao do colaborador: a nota e a media das SUAS avaliacoes.
+        // Visao do colaborador: a nota conta apenas depois da validacao.
         t.alocacoes.forEach(function (a) {
-          if (a.nota !== null && a.nota !== undefined) {
+          if (a.estado === "Validada" && a.nota !== null && a.nota !== undefined) {
             somaNotas += parseFloat(a.nota);
             totalNotas++;
           }
@@ -697,7 +758,7 @@ var getById = async function (req, res) {
 
     if (!tarefa) return res.status(404).json({ error: "Tarefa nao encontrada" });
     await derivarTarefa(tarefa.id, req, tarefa);
-    decorarResposta(tarefa);
+    decorarResposta(tarefa, null, { verNotasPendentes: ehGestorTarefas(req.utilizador) });
 
     return res.status(200).json({ dados: tarefa });
   } catch (e) {
@@ -1027,9 +1088,9 @@ var editarAlocacao = async function (req, res) {
 
     var alterarJanela = dados.janela_inicio !== undefined || dados.janela_fim !== undefined;
     if (alterarJanela) {
-      if (aloc.estado === "Concluida" || aloc.estado === "Validada") {
+      if (ESTADOS_POR_VALIDAR.indexOf(aloc.estado) !== -1 || aloc.estado === "Validada") {
         return res.status(400).json({
-          error: "Para alterar a janela de uma tarefa concluida ou validada, use a reabertura",
+          error: "Para alterar a janela de uma tarefa terminada ou validada, use a reabertura",
         });
       }
       var inicio = dados.janela_inicio !== undefined
@@ -1196,13 +1257,14 @@ var iniciar = async function (req, res) {
   }
 };
 
-// ==================== TERMINAR (colaborador conclui; avaliacao automatica) ====================
+// ==================== TERMINAR (colaborador marca terminado; valida o admin) ====================
 
-// O colaborador marca o trabalho como terminado. O sistema avalia
-// automaticamente pela rapidez (1a metade=20, 2a metade=16, ultimos 10%=12;
-// fora do prazo=5). Se o colaborador NAO terminar, a janela expira para
-// "Atrasada" SEM nota e o gestor decide (reabrir/eliminar/avaliar manual).
-// O gestor pode reavaliar depois.
+// O colaborador marca o trabalho como terminado, mas isso NAO conclui a
+// tarefa: fica "Aguarda_Validacao" ate o administrador confirmar que o
+// trabalho esta realmente feito. A nota e automatica (cumprimento do tempo)
+// e so e exposta depois dessa confirmacao. Se o colaborador nunca terminar, a
+// janela expira para "Atrasada" e o gestor decide (reabrir/eliminar) ou o
+// administrador valida (nota automatica de 5 por ter passado o prazo).
 var terminar = async function (req, res) {
   try {
     var ctx = await carregarTarefa(req);
@@ -1220,40 +1282,38 @@ var terminar = async function (req, res) {
 
     var agora = new Date();
     var nome = aloc.colaborador ? aloc.colaborador.nome_completo : "Colaborador";
-    var fim = new Date(aloc.janela_fim).getTime();
+    var foraDoPrazo = agora.getTime() > new Date(aloc.janela_fim).getTime();
 
-    if (agora.getTime() > fim) {
-      // Fora do prazo: conta como atrasada.
-      aloc.estado = "Atrasada";
-      aloc.progresso = 100;
-      aloc.data_conclusao = new Date(aloc.janela_fim);
-      await avaliarAutomaticamente(aloc, agora);
-      await registrarEvento(
-        ctx.tarefa.id, req.utilizador.id, "terminada",
-        nome + " marcou a tarefa como terminada, mas fora do prazo - " +
-          "avaliacao automatica " + aloc.nota + "/20 (" + aloc.classificacao + ")",
-        { alocacao_id: aloc.id, nota: aloc.nota, atrasada: true, automatica: true }
-      );
-    } else {
-      aloc.estado = "Concluida";
-      aloc.progresso = 100;
-      aloc.data_conclusao = agora;
-      await avaliarAutomaticamente(aloc, agora);
-      await registrarEvento(
-        ctx.tarefa.id, req.utilizador.id, "terminada",
-        nome + " marcou a tarefa como terminada - " +
-          "avaliacao automatica " + aloc.nota + "/20 (" + aloc.classificacao + ")",
-        { alocacao_id: aloc.id, nota: aloc.nota, automatica: true }
-      );
-    }
+    aloc.estado = "Aguarda_Validacao";
+    aloc.progresso = 100;
+    aloc.data_conclusao = agora;
+    // Nota automatica pelo cumprimento do tempo. O administrador apenas
+    // confirma a conclusao; nao altera a nota.
+    var nota = aplicarNotaAutomatica(aloc, agora);
+    await aloc.save();
+
+    await registrarEvento(
+      ctx.tarefa.id, req.utilizador.id, "terminada",
+      nome + " marcou o trabalho como terminado" +
+        (foraDoPrazo ? " (fora do prazo)" : "") +
+        " - nota automatica " + nota + "/20 (" + aloc.classificacao + ")" +
+        " - aguarda validacao do administrador",
+      { alocacao_id: aloc.id, nota: nota, atrasada: foraDoPrazo, automatica: true }
+    );
+    await notificarAdministradores(
+      req, ctx.tarefa, "Trabalho por Validar",
+      (aloc.colaborador ? aloc.colaborador.nome_completo : "Um colaborador") +
+        " marcou a tarefa '" + ctx.tarefa.titulo + "' como terminada - confirme se o trabalho esta concluido",
+      "warning"
+    );
 
     await derivarTarefa(ctx.tarefa.id, req);
     var resultado = await Tarefa.findByPk(ctx.tarefa.id, { include: incluicoes().concat([incluicaoAlocacoes()]) });
     decorarResposta(resultado);
     return res.status(200).json({
-      mensagem: aloc.estado === "Atrasada"
-        ? "Tarefa terminada fora do prazo - avaliacao automatica " + aloc.nota + "/20"
-        : "Tarefa terminada - avaliacao automatica " + aloc.nota + "/20",
+      mensagem: "Trabalho marcado como terminado" +
+        (foraDoPrazo ? " (fora do prazo)" : "") +
+        " - nota automatica " + nota + "/20 - aguarda validacao do administrador",
       dados: resultado,
     });
   } catch (e) {
@@ -1334,8 +1394,8 @@ var decidirJustificativa = async function (req, res) {
     }
 
     var decisao = req.body && req.body.decisao;
-    if (decisao !== "aceitar" && decisao !== "rejeitar") {
-      return res.status(400).json({ error: "Decisao invalida (aceitar ou rejeitar)" });
+    if (decisao !== "aceitar" && decisao !== "rejeitar" && decisao !== "reagendar") {
+      return res.status(400).json({ error: "Decisao invalida (aceitar, rejeitar ou reagendar)" });
     }
     var observacoes = req.body && req.body.observacoes ? String(req.body.observacoes).trim().slice(0, 2000) : null;
     var nomeColab = aloc.colaborador ? aloc.colaborador.nome_completo : "o colaborador";
@@ -1408,6 +1468,54 @@ var decidirJustificativa = async function (req, res) {
       return res.status(200).json({ mensagem: "Justificativa aceite", dados: resultado1 });
     }
 
+    // Reagendada: a justificativa e aceite mas a participacao continua, com uma
+    // janela nova. A tarefa volta a Pendente e o progresso recomeca do zero.
+    if (decisao === "reagendar") {
+      var validacaoR = validarJanelasEntrada([{
+        colaborador_id: aloc.colaborador_id,
+        janela_inicio: req.body && req.body.janela_inicio,
+        janela_fim: req.body && req.body.janela_fim,
+      }]);
+      if (validacaoR.erro) return res.status(400).json({ error: validacaoR.erro });
+
+      aloc.janela_inicio = validacaoR.alocacoes[0].janela_inicio;
+      aloc.janela_fim = validacaoR.alocacoes[0].janela_fim;
+      aloc.estado = "Pendente";
+      aloc.data_inicio = null;
+      aloc.data_conclusao = null;
+      aloc.progresso = 0;
+      aloc.justificativa_decisao = observacoes || "Tarefa reagendada";
+      aloc.justificativa_data = new Date();
+      aloc.nota = null;
+      aloc.desempenho = null;
+      aloc.produtividade = null;
+      aloc.cumprimento_prazo = null;
+      aloc.classificacao = null;
+      aloc.avaliado_por = null;
+      aloc.avaliado_em = null;
+      await aloc.save();
+
+      await registrarEvento(
+        tarefa.id, req.utilizador.id, "justificativa_reagendada",
+        req.utilizador.nome_completo + " reagendou a tarefa de " + nomeColab +
+          " (nova janela: " + textoDataCurta(aloc.janela_inicio) + " ate " + textoDataCurta(aloc.janela_fim) + ")" +
+          (observacoes ? " (" + observacoes + ")" : "")
+      );
+      await notificar(
+        req, aloc.colaborador ? aloc.colaborador.utilizador_id : null,
+        "Tarefa Reagendada",
+        "A sua tarefa '" + tarefa.titulo + "' foi reagendada. Novo prazo: " +
+          textoDataCurta(aloc.janela_fim) + ".",
+        "info"
+      );
+
+      await sincronizarJanelas(req.utilizador.organizacao_id, req);
+      await derivarTarefa(tarefa.id, req);
+      var resultadoR = await Tarefa.findByPk(tarefa.id, { include: incluicoes().concat([incluicaoAlocacoes()]) });
+      decorarResposta(resultadoR);
+      return res.status(200).json({ mensagem: "Tarefa reagendada", dados: resultadoR });
+    }
+
     // Rejeitada: volta a contar (ou mantem-se atrasada se a janela ja passou).
     var fim = new Date(aloc.janela_fim).getTime();
     var estadoAnterior = fim > Date.now()
@@ -1450,27 +1558,25 @@ var progresso = async function (req, res) {
   });
 };
 
-// ==================== AVALIAR / VALIDAR (gestor, nota POR COLABORADOR) ====================
+// ==================== VALIDAR (administrador confirma a conclusao) ====================
 
+// Apenas o administrador confirma que o trabalho esta realmente concluido e
+// registra a avaliacao final. Os gestores nao se podem auto-aprovar: para
+// devolver o trabalho usam "reabrir".
 var validar = async function (req, res) {
   try {
-    if (!ehGestorTarefas(req.utilizador)) {
-      return res.status(403).json({ error: "Apenas gestores podem avaliar tarefas" });
-    }
-
-    // Compatibilidade: reabrir via /validar.
+    // Compatibilidade: reabrir via /validar (basta ser gestor).
     if (req.body && req.body.acao === "reabrir") {
       return reabrir(req, res);
+    }
+
+    if (!ehAdministradorTarefas(req.utilizador)) {
+      return res.status(403).json({ error: "Apenas o administrador pode validar a conclusao das tarefas" });
     }
 
     var ctx = await carregarTarefa(req);
     if (ctx.erro) return res.status(ctx.erro.status).json({ error: ctx.erro.mensagem });
     var tarefa = ctx.tarefa;
-
-    var avaliacoes = req.body && req.body.avaliacoes;
-    if (!Array.isArray(avaliacoes) || avaliacoes.length === 0) {
-      return res.status(400).json({ error: "Indique a nota de cada colaborador a avaliar" });
-    }
 
     var alocacoes = await TarefaAlocacao.findAll({
       where: { tarefa_id: tarefa.id },
@@ -1479,60 +1585,47 @@ var validar = async function (req, res) {
     var mapa = {};
     alocacoes.forEach(function (a) { mapa[a.id] = a; });
 
+    // Aceita alocacao_ids (novo), avaliacoes (compatibilidade) ou, sem lista,
+    // valida todas as atribuicoes por validar desta tarefa.
+    var pedidos = null;
+    if (req.body && Array.isArray(req.body.alocacao_ids) && req.body.alocacao_ids.length > 0) {
+      pedidos = req.body.alocacao_ids;
+    } else if (req.body && Array.isArray(req.body.avaliacoes) && req.body.avaliacoes.length > 0) {
+      pedidos = req.body.avaliacoes.map(function (e) {
+        return e ? e.alocacao_id : null;
+      }).filter(function (id) { return !!id; });
+    }
+
+    var alvos = pedidos
+      ? pedidos.map(function (id) { return mapa[id]; }).filter(function (a) { return !!a; })
+      : alocacoes.filter(function (a) {
+          return ESTADOS_POR_VALIDAR.indexOf(a.estado) !== -1 || a.estado === "Atrasada";
+        });
+
+    if (alvos.length === 0) {
+      return res.status(400).json({ error: "Nao ha colaboradores por validar nesta tarefa" });
+    }
+
     var avaliadas = [];
-    for (var i = 0; i < avaliacoes.length; i++) {
-      var entrada = avaliacoes[i] || {};
-      var aloc = mapa[entrada.alocacao_id];
-      if (!aloc) return res.status(404).json({ error: "Atribuicao nao encontrada nesta tarefa" });
-      if (aloc.estado !== "Concluida" && aloc.estado !== "Atrasada") {
+    for (var i = 0; i < alvos.length; i++) {
+      var aloc = alvos[i];
+      if (ESTADOS_POR_VALIDAR.indexOf(aloc.estado) === -1 && aloc.estado !== "Atrasada") {
         return res.status(400).json({
           error: "Atribuicao de " + (aloc.colaborador ? aloc.colaborador.nome_completo : "colaborador") +
-            " nao esta concluida (estado actual: " + aloc.estado + ")",
+            " nao esta por validar (estado actual: " + aloc.estado + ")",
         });
       }
 
-      // Indicadores de avaliacao (0-20 cada): desempenho, produtividade e
-      // cumprimento do prazo. A nota final e a media dos tres, calculada
-      // pelo sistema. Aceita tambem uma nota directa (compatibilidade).
-      var temIndicadores = entrada.desempenho !== undefined || entrada.produtividade !== undefined ||
-        entrada.cumprimento_prazo !== undefined;
-
-      if (temIndicadores) {
-        var desempenho = entrada.desempenho === null || entrada.desempenho === undefined || entrada.desempenho === ""
-          ? NaN : parseFloat(entrada.desempenho);
-        var produtividade = entrada.produtividade === null || entrada.produtividade === undefined || entrada.produtividade === ""
-          ? NaN : parseFloat(entrada.produtividade);
-        var cumprimento = entrada.cumprimento_prazo === null || entrada.cumprimento_prazo === undefined || entrada.cumprimento_prazo === ""
-          ? NaN : parseFloat(entrada.cumprimento_prazo);
-        if (isNaN(desempenho) || isNaN(produtividade) || isNaN(cumprimento) ||
-            desempenho < 0 || desempenho > 20 || produtividade < 0 || produtividade > 20 ||
-            cumprimento < 0 || cumprimento > 20) {
-          return res.status(400).json({
-            error: "Indicadores invalidos: desempenho, produtividade e cumprimento do prazo de 0 a 20",
-          });
-        }
-        desempenho = Math.round(desempenho * 100) / 100;
-        produtividade = Math.round(produtividade * 100) / 100;
-        cumprimento = Math.round(cumprimento * 100) / 100;
-        var notaFinal = Math.round(((desempenho + produtividade + cumprimento) / 3) * 100) / 100;
-        aloc.desempenho = desempenho;
-        aloc.produtividade = produtividade;
-        aloc.cumprimento_prazo = cumprimento;
-        aloc.nota = notaFinal;
+      // A nota e automatica (cumprimento do tempo). Se ainda nao estiver
+      // calculada, calcula-se agora. O administrador nunca atribui a nota.
+      if (aloc.nota === null || aloc.nota === undefined || aloc.nota === "") {
+        aplicarNotaAutomatica(aloc, aloc.data_conclusao || new Date());
       } else {
-        var nota = entrada.nota === null || entrada.nota === undefined || entrada.nota === ""
-          ? NaN : parseFloat(entrada.nota);
-        if (isNaN(nota) || nota < 0 || nota > 20) {
-          return res.status(400).json({ error: "Nota invalida (de 0 a 20)" });
-        }
-        aloc.nota = Math.round(nota * 100) / 100;
+        aloc.nota = parseFloat(aloc.nota);
+        aloc.classificacao = aloc.classificacao || classificarNota(aloc.nota);
       }
 
-      aloc.classificacao = classificarNota(parseFloat(aloc.nota));
-      aloc.observacoes = entrada.observacoes ? String(entrada.observacoes).trim().slice(0, 4000) : null;
       aloc.estado = "Validada";
-      aloc.avaliado_por = req.utilizador.id;
-      aloc.avaliado_em = new Date();
       await aloc.save();
       avaliadas.push(aloc);
     }
@@ -1540,10 +1633,10 @@ var validar = async function (req, res) {
     for (var j = 0; j < avaliadas.length; j++) {
       var avaliada = avaliadas[j];
       await registrarEvento(
-        tarefa.id, req.utilizador.id, "avaliada",
-        req.utilizador.nome_completo + " avaliou " +
+        tarefa.id, req.utilizador.id, "validada",
+        req.utilizador.nome_completo + " confirmou a conclusao do trabalho de " +
           (avaliada.colaborador ? avaliada.colaborador.nome_completo : "o colaborador") +
-          " com nota " + avaliada.nota + " (" + avaliada.classificacao + ")" +
+          " - nota automatica " + avaliada.nota + " (" + avaliada.classificacao + ")" +
           (avaliada.desempenho !== null && avaliada.desempenho !== undefined
             ? " - desempenho " + avaliada.desempenho + ", produtividade " + avaliada.produtividade +
               ", prazo " + avaliada.cumprimento_prazo : "") +
@@ -1558,8 +1651,9 @@ var validar = async function (req, res) {
       );
       await notificar(
         req, avaliada.colaborador ? avaliada.colaborador.utilizador_id : null,
-        "Tarefa Avaliada",
-        "A tarefa '" + tarefa.titulo + "' foi avaliada com nota " + avaliada.nota + " (" + avaliada.classificacao + ")",
+        "Tarefa Validada",
+        "O administrador confirmou a conclusao da tarefa '" + tarefa.titulo +
+          "' - nota automatica " + avaliada.nota + " (" + avaliada.classificacao + ")",
         "success"
       );
     }
@@ -1571,7 +1665,7 @@ var validar = async function (req, res) {
     await derivarTarefa(tarefa.id, req);
     var resultado = await Tarefa.findByPk(tarefa.id, { include: incluicoes().concat([incluicaoAlocacoes()]) });
     decorarResposta(resultado);
-    return res.status(200).json({ mensagem: "Avaliacao registada", dados: resultado });
+    return res.status(200).json({ mensagem: "Conclusao validada (nota automatica)", dados: resultado });
   } catch (e) {
     console.log("Erro ao validar tarefa:", e.message);
     return res.status(500).json({ error: "Erro interno do servidor" });
@@ -1599,7 +1693,9 @@ var reabrir = async function (req, res) {
     var alvosIds = Array.isArray(req.body.alocacao_ids) && req.body.alocacao_ids.length > 0
       ? req.body.alocacao_ids
       : alocacoes
-          .filter(function (a) { return a.estado === "Validada" || a.estado === "Concluida" || a.estado === "Atrasada"; })
+          .filter(function (a) {
+            return a.estado === "Validada" || ESTADOS_POR_VALIDAR.indexOf(a.estado) !== -1 || a.estado === "Atrasada";
+          })
           .map(function (a) { return a.id; });
 
     if (alvosIds.length === 0) {
@@ -1617,7 +1713,7 @@ var reabrir = async function (req, res) {
     for (var i = 0; i < alvosIds.length; i++) {
       var aloc = mapa[alvosIds[i]];
       if (!aloc) return res.status(404).json({ error: "Atribuicao nao encontrada nesta tarefa" });
-      if (aloc.estado !== "Validada" && aloc.estado !== "Concluida" && aloc.estado !== "Atrasada") {
+      if (aloc.estado !== "Validada" && ESTADOS_POR_VALIDAR.indexOf(aloc.estado) === -1 && aloc.estado !== "Atrasada") {
         return res.status(400).json({
           error: "Atribuicao de " + (aloc.colaborador ? aloc.colaborador.nome_completo : "colaborador") +
             " nao pode ser reaberta (estado actual: " + aloc.estado + ")",

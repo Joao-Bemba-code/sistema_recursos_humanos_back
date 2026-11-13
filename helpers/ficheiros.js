@@ -193,6 +193,40 @@ function descarregarUrl(url) {
   });
 }
 
+// O Cloudinary bloqueia a entrega directa de PDF/ZIP (responde 401) quando a
+// conta tem essa restricao ligada. Nesses casos e preciso um URL assinado.
+// Devolve null quando nao e um URL do Cloudinary ou quando nao da para assinar.
+async function urlAssinadaCloudinary(url) {
+  if (!cloudinaryConfigurado()) return null;
+
+  var limpo = String(url).split("?")[0];
+  if (limpo.indexOf("res.cloudinary.com") === -1) return null;
+
+  var registo = await Ficheiro.findOne({ where: { url: limpo } });
+  var publicId = registo && registo.public_id ? registo.public_id : null;
+  var formato = registo ? path.extname(String(registo.nome || "")).replace(".", "").toLowerCase() : "";
+
+  if (!publicId) {
+    // Sem registo: deduzir do proprio URL (.../upload/v123/<public_id>.<ext>).
+    var m = limpo.match(/\/upload\/(?:v\d+\/)?(.+)$/);
+    if (!m) return null;
+    var caminho = m[1];
+    var ext = path.extname(caminho).replace(".", "").toLowerCase();
+    if (!ext) return null;
+    publicId = caminho.substring(0, caminho.length - ext.length - 1);
+    formato = ext;
+  }
+  if (!publicId || !formato) return null;
+
+  var mime = String((registo && registo.tipo) || "").toLowerCase();
+  var recurso = (formato === "pdf" || mime.indexOf("image/") === 0) ? "image" : "raw";
+
+  return cloudinary.utils.private_download_url(publicId, formato, {
+    resource_type: recurso,
+    type: "upload",
+  });
+}
+
 // Le qualquer referencia a ficheiro (URL http do Cloudinary, /uploads/...
 // legado ou /api/ficheiros/<id>) e devolve o conteudo em Buffer.
 async function lerBufferDeUrl(url) {
@@ -210,6 +244,21 @@ async function lerBufferDeUrl(url) {
     try {
       return await descarregarUrl(clean);
     } catch (e) {
+      // PDF/ZIP com entrega restrita no Cloudinary: tentar o URL assinado.
+      var assinada = null;
+      try {
+        assinada = await urlAssinadaCloudinary(clean);
+      } catch (e2) {
+        assinada = null;
+      }
+      if (assinada) {
+        try {
+          return await descarregarUrl(assinada);
+        } catch (e3) {
+          console.log("Aviso: nao foi possivel descarregar " + clean + " (assinado): " + e3.message);
+          return null;
+        }
+      }
       console.log("Aviso: nao foi possivel descarregar " + clean + ": " + e.message);
       return null;
     }
@@ -224,6 +273,53 @@ async function lerBufferDeUrl(url) {
   }
 
   return null;
+}
+
+// Nome do ficheiro a partir de uma referencia guardada (URL do Cloudinary,
+// /uploads/... legado ou /api/ficheiros/<id>). O nome sugerido pelo ecra manda
+// (ex.: "comprovativo-justificacao.pdf"); da referencia aproveita-se apenas a
+// extensao real, para nao sair um nome como "1794555377889_x.pdf.pdf".
+function nomeDeReferencia(referencia, nomeSugerido) {
+  var limpo = String(referencia || "").split("?")[0];
+  var partes = limpo.split("/");
+  var ultimo = partes[partes.length - 1] || "";
+  try {
+    ultimo = decodeURIComponent(ultimo);
+  } catch (e) {
+    // fica como esta
+  }
+
+  var ext = "";
+  if (ultimo && ultimo.indexOf(".") !== -1) {
+    ext = "." + ultimo.split(".").pop().toLowerCase();
+  }
+
+  var base = nomeSugerido ? String(nomeSugerido) : (ultimo || "documento");
+  if (ext) {
+    if (base.toLowerCase().slice(-ext.length) === ext) return base;
+    var ponto = base.lastIndexOf(".");
+    if (ponto > 0) base = base.substring(0, ponto);
+    base += ext;
+  }
+  return base || "documento";
+}
+
+// Le qualquer referencia a ficheiro e envia o conteudo como anexo para
+// descarregar (Content-Disposition: attachment). Devolve true quando enviou o
+// ficheiro e false quando nao o encontrou - o controlador trata o 404.
+async function responderComFicheiro(res, referencia, nomeSugerido) {
+  if (!referencia) return false;
+  var buffer = await lerBufferDeUrl(referencia);
+  if (!buffer) return false;
+
+  var nome = nomeDeReferencia(referencia, nomeSugerido);
+  var extensao = nome.indexOf(".") !== -1 ? "." + nome.split(".").pop().toLowerCase() : "";
+
+  res.setHeader("Content-Type", MIME_POR_EXTENSAO[extensao] || "application/octet-stream");
+  res.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodeURIComponent(nome));
+  res.setHeader("Content-Length", buffer.length);
+  res.send(buffer);
+  return true;
 }
 
 // O destroy() do SDK NAO aceita "auto": tenta primeiro o tipo que o MIME
@@ -382,6 +478,8 @@ module.exports = {
   guardarFicheiro,
   obterFicheiro,
   lerBufferDeUrl,
+  responderComFicheiro,
+  nomeDeReferencia,
   apagarFicheiroDeUrl,
   importarUploadsParaBD,
 };

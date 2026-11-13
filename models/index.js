@@ -25,6 +25,7 @@ var Notificacao = require("./Notificacao");
 var PedidoColaborador = require("./PedidoColaborador");
 var Ficheiro = require("./Ficheiro");
 var { Tarefa, TarefaEvento, TarefaAlocacao } = require("./Tarefa");
+var { Conversa, ConversaParticipante, Mensagem } = require("./Chat");
 var LogAuditoria = require("./LogAuditoria");
 
 // Organizacao -> Utilizadores
@@ -193,6 +194,12 @@ Aviso.belongsTo(Utilizador, { foreignKey: "criado_por", as: "criador" });
 Departamento.hasMany(Aviso, { foreignKey: "departamento_id", as: "avisos" });
 Aviso.belongsTo(Departamento, { foreignKey: "departamento_id", as: "departamento" });
 
+// Aviso -> Cargo / Colaborador (visibilidade por cargo e por perfil)
+Cargo.hasMany(Aviso, { foreignKey: "cargo_id", as: "avisos" });
+Aviso.belongsTo(Cargo, { foreignKey: "cargo_id", as: "cargo" });
+Colaborador.hasMany(Aviso, { foreignKey: "colaborador_id", as: "avisos_destino" });
+Aviso.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador_destino" });
+
 // Aviso -> Anexos (guardados na BD). Sem FK a nivel de BD (TiDB).
 Aviso.hasMany(ComunicacaoAnexo, { foreignKey: "comunicado_id", as: "anexos", constraints: false });
 ComunicacaoAnexo.belongsTo(Aviso, { foreignKey: "comunicado_id", as: "comunicado", constraints: false });
@@ -220,6 +227,16 @@ TarefaAlocacao.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colab
 Colaborador.hasMany(TarefaAlocacao, { foreignKey: "colaborador_id", as: "alocacoes", constraints: false });
 TarefaAlocacao.belongsTo(Utilizador, { foreignKey: "atribuido_por", as: "atribuidor", constraints: false });
 TarefaAlocacao.belongsTo(Utilizador, { foreignKey: "avaliado_por", as: "avaliador", constraints: false });
+
+// ==================== CHAT INTERNO ====================
+// Sem FKs a nivel de BD para compatibilidade com TiDB.
+Conversa.hasMany(ConversaParticipante, { foreignKey: "conversa_id", as: "participantes", constraints: false });
+ConversaParticipante.belongsTo(Conversa, { foreignKey: "conversa_id", as: "conversa", constraints: false });
+ConversaParticipante.belongsTo(Utilizador, { foreignKey: "utilizador_id", as: "utilizador", constraints: false });
+
+Conversa.hasMany(Mensagem, { foreignKey: "conversa_id", as: "mensagens", constraints: false });
+Mensagem.belongsTo(Conversa, { foreignKey: "conversa_id", as: "conversa", constraints: false });
+Mensagem.belongsTo(Utilizador, { foreignKey: "utilizador_id", as: "remetente", constraints: false });
 
 // Departamento -> Departamento (hierarquia)
 Departamento.belongsTo(Departamento, { foreignKey: "departamento_pai_id", as: "pai" });
@@ -522,6 +539,14 @@ var syncDatabase = async () => {
         await sequelize.query("ALTER TABLE `avisos` ADD COLUMN `criado_por` VARCHAR(36) NULL");
         console.log(" Coluna 'criado_por' adicionada a avisos!");
       }
+      if (nomesAvisos.indexOf("cargo_id") === -1) {
+        await sequelize.query("ALTER TABLE `avisos` ADD COLUMN `cargo_id` CHAR(36) NULL");
+        console.log(" Coluna 'cargo_id' adicionada a avisos!");
+      }
+      if (nomesAvisos.indexOf("colaborador_id") === -1) {
+        await sequelize.query("ALTER TABLE `avisos` ADD COLUMN `colaborador_id` CHAR(36) NULL");
+        console.log(" Coluna 'colaborador_id' adicionada a avisos!");
+      }
     } catch (alterErrAvisos) {
       console.log(" Aviso: problema ao adicionar colunas de avisos:", alterErrAvisos.message);
     }
@@ -569,5 +594,8 @@ module.exports = {
   Tarefa,
   TarefaEvento,
   TarefaAlocacao,
+  Conversa,
+  ConversaParticipante,
+  Mensagem,
   LogAuditoria,
 };

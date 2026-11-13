@@ -195,6 +195,9 @@ var migrations = async function () {
     // ==================== AVISOS / COMUNICADOS ====================
     await adicionarColuna("avisos", "organizacao_id", "VARCHAR(36) NULL");
     await adicionarColuna("avisos", "criado_por", "VARCHAR(36) NULL");
+    await adicionarColuna("avisos", "cargo_id", "CHAR(36) NULL");
+    await adicionarColuna("avisos", "colaborador_id", "CHAR(36) NULL");
+    console.log(" Colunas de destinatarios (cargo_id/colaborador_id) em 'avisos' garantidas!");
 
     // ==================== COLABORADORES ====================
     await alterarColuna("colaboradores", "nome_completo", "VARCHAR(200) NULL");
@@ -476,30 +479,97 @@ var migrations = async function () {
     // ==================== TAREFAS: estado 'Atrasada' nos ENUMs ====================
     // Atrasada = janela terminou sem o colaborador concluir. SEM avaliacao
     // automatica: fica pendente de decisao do gestor (reabrir, eliminar ou
-    // avaliar manualmente, tendo em conta a justificativa do colaborador).
+    // validar manualmente, tendo em conta a justificativa do colaborador).
+    // Aguarda_Validacao = colaborador marcou terminado; o administrador tem
+    // de confirmar que o trabalho esta realmente concluido.
     try {
       var enumTarefa = await sequelize.query("SHOW COLUMNS FROM `tarefas` LIKE 'estado'");
       var linhasEnumT = Array.isArray(enumTarefa[0]) ? enumTarefa[0] : enumTarefa;
       var tipoEnumT = linhasEnumT.length ? String(linhasEnumT[0].Type || "") : "";
-      if (tipoEnumT && tipoEnumT.indexOf("Atrasada") === -1) {
+      if (tipoEnumT && tipoEnumT.indexOf("Aguarda_Validacao") === -1) {
         await sequelize.query(
           "ALTER TABLE `tarefas` MODIFY COLUMN `estado` " +
-          "ENUM('Pendente','Em_curso','Atrasada','Concluida','Validada','Cancelada') " +
+          "ENUM('Pendente','Em_curso','Atrasada','Aguarda_Validacao','Concluida','Validada','Cancelada') " +
           "NOT NULL DEFAULT 'Pendente'"
         );
-        console.log(" ENUM 'estado' de tarefas com 'Atrasada' garantido!");
+        console.log(" ENUM 'estado' de tarefas com 'Aguarda_Validacao' garantido!");
       }
 
       var enumAloc = await sequelize.query("SHOW COLUMNS FROM `tarefa_alocacoes` LIKE 'estado'");
       var linhasEnumA = Array.isArray(enumAloc[0]) ? enumAloc[0] : enumAloc;
       var tipoEnumA = linhasEnumA.length ? String(linhasEnumA[0].Type || "") : "";
-      if (tipoEnumA && tipoEnumA.indexOf("Atrasada") === -1) {
+      if (tipoEnumA && tipoEnumA.indexOf("Aguarda_Validacao") === -1) {
         await sequelize.query(
           "ALTER TABLE `tarefa_alocacoes` MODIFY COLUMN `estado` " +
-          "ENUM('Pendente','Em_curso','Reaberta','Justificativa','Atrasada','Concluida','Validada','Cancelada') " +
+          "ENUM('Pendente','Em_curso','Reaberta','Justificativa','Atrasada','Aguarda_Validacao','Concluida','Validada','Cancelada') " +
           "NOT NULL DEFAULT 'Pendente'"
         );
-        console.log(" ENUM 'estado' de tarefa_alocacoes com 'Atrasada' garantido!");
+        console.log(" ENUM 'estado' de tarefa_alocacoes com 'Aguarda_Validacao' garantido!");
+      }
+
+      // Registos antigos "Concluida" passam a aguardar validacao. A nota
+      // automatica antiga e limpa antes da migracao e recalculada abaixo.
+      await sequelize.query(
+        "UPDATE `tarefa_alocacoes` SET `nota` = NULL, `desempenho` = NULL, " +
+        "`produtividade` = NULL, `cumprimento_prazo` = NULL, `classificacao` = NULL, " +
+        "`avaliado_por` = NULL, `avaliado_em` = NULL " +
+        "WHERE `estado` = 'Concluida' AND `avaliado_por` IS NULL"
+      );
+      var migradasTarefas = await sequelize.query(
+        "UPDATE `tarefas` SET `estado` = 'Aguarda_Validacao' WHERE `estado` = 'Concluida'"
+      );
+      var migradasAloc = await sequelize.query(
+        "UPDATE `tarefa_alocacoes` SET `estado` = 'Aguarda_Validacao' WHERE `estado` = 'Concluida'"
+      );
+      var totalMigradas = 0;
+      [migradasTarefas, migradasAloc].forEach(function (r) {
+        var linhas = Array.isArray(r) && r.length > 1 ? r[0] : r;
+        if (linhas && linhas.affectedRows) totalMigradas += linhas.affectedRows;
+      });
+      if (totalMigradas > 0) {
+        console.log(" " + totalMigradas + " registo(s) 'Concluida' passaram a 'Aguarda_Validacao'!");
+      }
+
+      // Preenche a nota automatica nos registos por validar que ainda nao a
+      // tenham (inclui os legados acabados de migrar). A nota depende apenas
+      // do tempo de cumprimento dentro da janela.
+      try {
+        var modelosMigracao = require("./models");
+        var pendentesNota = await modelosMigracao.TarefaAlocacao.findAll({
+          where: { estado: "Aguarda_Validacao" },
+        });
+        var atualizadosNota = 0;
+        for (var pn = 0; pn < pendentesNota.length; pn++) {
+          var alocPn = pendentesNota[pn];
+          if (alocPn.nota !== null && alocPn.nota !== undefined) continue;
+          var iniPn = new Date(alocPn.janela_inicio).getTime();
+          var fimPn = new Date(alocPn.janela_fim).getTime();
+          var refPn = alocPn.data_conclusao ? new Date(alocPn.data_conclusao).getTime() : Date.now();
+          var notaPn = 16;
+          if (!isNaN(iniPn) && !isNaN(fimPn) && fimPn > iniPn) {
+            if (refPn >= fimPn) {
+              notaPn = 5;
+            } else {
+              var razaoPn = Math.max(0, refPn - iniPn) / (fimPn - iniPn);
+              notaPn = razaoPn <= 0.5 ? 20 : (razaoPn <= 0.9 ? 16 : 12);
+            }
+          }
+          alocPn.nota = notaPn;
+          alocPn.desempenho = notaPn;
+          alocPn.produtividade = notaPn;
+          alocPn.cumprimento_prazo = notaPn;
+          alocPn.classificacao = notaPn >= 18 ? "Excelente" : notaPn >= 15 ? "Bom" :
+            notaPn >= 10 ? "Suficiente" : notaPn >= 5 ? "Insuficiente" : "Mau";
+          alocPn.avaliado_por = null;
+          alocPn.avaliado_em = alocPn.data_conclusao || new Date();
+          await alocPn.save();
+          atualizadosNota++;
+        }
+        if (atualizadosNota > 0) {
+          console.log(" " + atualizadosNota + " registo(s) por validar com nota automatica preenchida!");
+        }
+      } catch (eBackfillNota) {
+        console.log(" Aviso: preenchimento da nota automatica falhou:", eBackfillNota.message);
       }
     } catch (eEnumT) {
       console.log(" Aviso: problema ao actualizar ENUMs de tarefas:", eEnumT.message);
@@ -569,6 +639,59 @@ var migrations = async function () {
     } catch (eAlocacoes) {
       console.log(" Aviso: problema ao migrar tarefas para alocacoes:", eAlocacoes.message);
     }
+
+    // ==================== CHAT INTERNO ====================
+    // Conversa geral (uma por organizacao) + conversas directas entre dois
+    // utilizadores. Sem FKs a nivel de BD para compatibilidade com TiDB.
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `conversas` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`organizacao_id` CHAR(36) NOT NULL, " +
+      "`tipo` ENUM('geral','direta') NOT NULL DEFAULT 'direta', " +
+      "`titulo` VARCHAR(150) NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "KEY `conversas_org_tipo_idx` (`organizacao_id`, `tipo`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'conversas' garantida!");
+
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `conversa_participantes` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`conversa_id` CHAR(36) NOT NULL, " +
+      "`utilizador_id` CHAR(36) NOT NULL, " +
+      "`ultima_leitura` DATETIME NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "KEY `conversa_participantes_conversa_idx` (`conversa_id`, `utilizador_id`), " +
+      "KEY `conversa_participantes_utilizador_idx` (`utilizador_id`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'conversa_participantes' garantida!");
+
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `mensagens` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`conversa_id` CHAR(36) NOT NULL, " +
+      "`utilizador_id` CHAR(36) NOT NULL, " +
+      "`texto` TEXT NOT NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "KEY `mensagens_conversa_idx` (`conversa_id`, `createdAt`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'mensagens' garantida!");
+
+    // Anexos nas mensagens do chat (imagens, PDF, documentos Office).
+    await adicionarColuna("mensagens", "anexo_url", "VARCHAR(500) NULL");
+    await adicionarColuna("mensagens", "anexo_nome", "VARCHAR(250) NULL");
+    await adicionarColuna("mensagens", "anexo_tipo", "VARCHAR(120) NULL");
+    await adicionarColuna("mensagens", "anexo_tamanho", "INT NULL");
+    console.log(" Colunas de anexo em 'mensagens' garantidas!");
 
     console.log(" Migracoes concluidas com sucesso!");
   } catch (e) {
