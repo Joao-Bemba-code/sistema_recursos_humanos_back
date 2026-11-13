@@ -476,6 +476,15 @@ var migrations = async function () {
     await adicionarColuna("tarefa_alocacoes", "descricao", "TEXT NULL");
     console.log(" Coluna 'descricao' garantida em 'tarefa_alocacoes'!");
 
+    // ==================== TAREFAS: pedido de correccao pelo gestor ====================
+    // O gestor pede correccao apos o colaborador submeter: motivo, quem pediu,
+    // quando e o prazo dado para corrigir.
+    await adicionarColuna("tarefa_alocacoes", "motivo_correcao", "TEXT NULL");
+    await adicionarColuna("tarefa_alocacoes", "correcao_pedida_por", "CHAR(36) NULL");
+    await adicionarColuna("tarefa_alocacoes", "correcao_pedida_em", "DATETIME NULL");
+    await adicionarColuna("tarefa_alocacoes", "prazo_correcao", "DATETIME NULL");
+    console.log(" Colunas de correccao garantidas em 'tarefa_alocacoes'!");
+
     // ==================== TAREFAS: estado 'Atrasada' nos ENUMs ====================
     // Atrasada = janela terminou sem o colaborador concluir. SEM avaliacao
     // automatica: fica pendente de decisao do gestor (reabrir, eliminar ou

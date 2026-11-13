@@ -1283,10 +1283,16 @@ var terminar = async function (req, res) {
     var agora = new Date();
     var nome = aloc.colaborador ? aloc.colaborador.nome_completo : "Colaborador";
     var foraDoPrazo = agora.getTime() > new Date(aloc.janela_fim).getTime();
+    var tinhaCorrecao = !!aloc.motivo_correcao;
 
     aloc.estado = "Aguarda_Validacao";
     aloc.progresso = 100;
     aloc.data_conclusao = agora;
+    // Ao reenviar depois de um pedido de correccao, o pedido fica resolvido.
+    aloc.motivo_correcao = null;
+    aloc.correcao_pedida_por = null;
+    aloc.correcao_pedida_em = null;
+    aloc.prazo_correcao = null;
     // Nota automatica pelo cumprimento do tempo. O administrador apenas
     // confirma a conclusao; nao altera a nota.
     var nota = aplicarNotaAutomatica(aloc, agora);
@@ -1295,6 +1301,7 @@ var terminar = async function (req, res) {
     await registrarEvento(
       ctx.tarefa.id, req.utilizador.id, "terminada",
       nome + " marcou o trabalho como terminado" +
+        (tinhaCorrecao ? " (correcoes entregues)" : "") +
         (foraDoPrazo ? " (fora do prazo)" : "") +
         " - nota automatica " + nota + "/20 (" + aloc.classificacao + ")" +
         " - aguarda validacao do administrador",
@@ -1303,7 +1310,9 @@ var terminar = async function (req, res) {
     await notificarAdministradores(
       req, ctx.tarefa, "Trabalho por Validar",
       (aloc.colaborador ? aloc.colaborador.nome_completo : "Um colaborador") +
-        " marcou a tarefa '" + ctx.tarefa.titulo + "' como terminada - confirme se o trabalho esta concluido",
+        " marcou a tarefa '" + ctx.tarefa.titulo + "' como terminada" +
+        (tinhaCorrecao ? " (correcoes entregues)" : "") +
+        " - confirme se o trabalho esta concluido",
       "warning"
     );
 
@@ -1312,6 +1321,7 @@ var terminar = async function (req, res) {
     decorarResposta(resultado);
     return res.status(200).json({
       mensagem: "Trabalho marcado como terminado" +
+        (tinhaCorrecao ? " (correcoes entregues)" : "") +
         (foraDoPrazo ? " (fora do prazo)" : "") +
         " - nota automatica " + nota + "/20 - aguarda validacao do administrador",
       dados: resultado,
@@ -1748,6 +1758,10 @@ var reabrir = async function (req, res) {
       aloc.janela_fim = fim;
       aloc.data_inicio = aloc.data_inicio || inicio;
       aloc.data_conclusao = null;
+      aloc.motivo_correcao = null;
+      aloc.correcao_pedida_por = null;
+      aloc.correcao_pedida_em = null;
+      aloc.prazo_correcao = null;
       aloc.progresso = calcularProgresso(
         { estado: "Reaberta", janela_inicio: inicio, janela_fim: fim, progresso: 0 }, agora
       );
@@ -1788,6 +1802,121 @@ var reabrir = async function (req, res) {
     });
   } catch (e) {
     console.log("Erro ao reabrir tarefa:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+// ==================== SOLICITAR CORRECCAO (gestor) ====================
+
+// O gestor devolve o trabalho submetido ao colaborador para correcoes, com
+// motivo obrigatorio e prazo (vazio = 24h). A atribuicao volta a "Em_curso"
+// e o motivo fica visivel ate o colaborador reenviar (terminar limpa-o).
+var solicitarCorrecao = async function (req, res) {
+  try {
+    if (!ehGestorTarefas(req.utilizador)) {
+      return res.status(403).json({ error: "Apenas gestores podem solicitar correccao" });
+    }
+    var ctx = await carregarTarefa(req);
+    if (ctx.erro) return res.status(ctx.erro.status).json({ error: ctx.erro.mensagem });
+    var tarefa = ctx.tarefa;
+
+    var motivo = req.body && req.body.motivo ? String(req.body.motivo).trim() : "";
+    if (!motivo) {
+      return res.status(400).json({ error: "Escreva o que deve ser corrigido" });
+    }
+    if (motivo.length < 5) {
+      return res.status(400).json({ error: "O motivo da correccao e demasiado curto" });
+    }
+
+    var alocacoes = await TarefaAlocacao.findAll({
+      where: { tarefa_id: tarefa.id },
+      include: [includeColaborador()],
+    });
+    var mapa = {};
+    alocacoes.forEach(function (a) { mapa[a.id] = a; });
+
+    var alvosIds = Array.isArray(req.body.alocacao_ids) && req.body.alocacao_ids.length > 0
+      ? req.body.alocacao_ids
+      : alocacoes
+          .filter(function (a) {
+            return a.estado === "Validada" || ESTADOS_POR_VALIDAR.indexOf(a.estado) !== -1 || a.estado === "Atrasada";
+          })
+          .map(function (a) { return a.id; });
+
+    if (alvosIds.length === 0) {
+      return res.status(400).json({ error: "Nao ha trabalhos submetidos nesta tarefa para pedir correccao" });
+    }
+
+    var agora = new Date();
+    var prazoInfo = parseDataJanela(req.body.prazo, false);
+    if (prazoInfo.erro) return res.status(400).json({ error: prazoInfo.erro });
+    var fim = prazoInfo.valor || new Date(agora.getTime() + 24 * 60 * 60 * 1000);
+    if (fim.getTime() <= agora.getTime()) {
+      return res.status(400).json({ error: "O prazo para corrigir tem de ser no futuro" });
+    }
+
+    var corrigidas = [];
+
+    for (var i = 0; i < alvosIds.length; i++) {
+      var aloc = mapa[alvosIds[i]];
+      if (!aloc) return res.status(404).json({ error: "Atribuicao nao encontrada nesta tarefa" });
+      if (aloc.estado !== "Validada" && ESTADOS_POR_VALIDAR.indexOf(aloc.estado) === -1 && aloc.estado !== "Atrasada") {
+        return res.status(400).json({
+          error: "A atribuicao de " + (aloc.colaborador ? aloc.colaborador.nome_completo : "colaborador") +
+            " nao pode receber pedido de correccao (estado actual: " + aloc.estado + ")",
+        });
+      }
+
+      aloc.estado = "Em_curso";
+      aloc.janela_inicio = agora;
+      aloc.janela_fim = fim;
+      aloc.data_inicio = aloc.data_inicio || agora;
+      aloc.data_conclusao = null;
+      aloc.motivo_correcao = motivo.slice(0, 2000);
+      aloc.correcao_pedida_por = req.utilizador.id;
+      aloc.correcao_pedida_em = agora;
+      aloc.prazo_correcao = fim;
+      // A avaliacao anterior deixa de contar: volta a ser calculada quando o
+      // colaborador reenviar e o administrador validar.
+      aloc.nota = null;
+      aloc.desempenho = null;
+      aloc.produtividade = null;
+      aloc.cumprimento_prazo = null;
+      aloc.classificacao = null;
+      aloc.observacoes = null;
+      aloc.avaliado_por = null;
+      aloc.avaliado_em = null;
+      aloc.justificativa = null;
+      aloc.justificativa_decisao = null;
+      aloc.justificativa_data = null;
+      await aloc.save();
+      corrigidas.push(aloc);
+
+      await registrarEvento(
+        tarefa.id, req.utilizador.id, "correcao_solicitada",
+        req.utilizador.nome_completo + " pediu correcoes a " +
+          (aloc.colaborador ? aloc.colaborador.nome_completo : "o colaborador") +
+          " - prazo ate " + textoDataCurta(fim) + " - motivo: " + motivo.slice(0, 300),
+        { alocacao_id: aloc.id, prazo: fim }
+      );
+      await notificar(
+        req, aloc.colaborador ? aloc.colaborador.utilizador_id : null,
+        "Pedido de correção",
+        "O gestor pediu correções na tarefa '" + tarefa.titulo + "' até " +
+          textoDataCurta(fim) + ". Motivo: " + motivo.slice(0, 500),
+        "warning"
+      );
+    }
+
+    await derivarTarefa(tarefa.id, req);
+    var resultado = await Tarefa.findByPk(tarefa.id, { include: incluicoes().concat([incluicaoAlocacoes()]) });
+    decorarResposta(resultado);
+    return res.status(200).json({
+      mensagem: corrigidas.length > 1 ? corrigidas.length + " correcoes solicitadas" : "Correcao solicitada",
+      dados: resultado,
+    });
+  } catch (e) {
+    console.log("Erro ao solicitar correccao:", e.message);
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
 };
@@ -1888,6 +2017,7 @@ module.exports = {
   progresso,
   validar,
   reabrir,
+  solicitarCorrecao,
   cancelar,
   remove,
   ehGestorTarefas,

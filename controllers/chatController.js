@@ -4,8 +4,47 @@ var { guardarFicheiro, responderComFicheiro } = require("../helpers/ficheiros");
 
 var MAX_TEXTO = 2000;
 
+// ==================== INDICADOR DE ESCRITA ====================
+// Mapa em memoria: "conversaId:utilizadorId" -> { nome, em }.
+// O ecra envia um sinal enquanto se escreve (no maximo a cada ~2s) e cada
+// leitura devolve os nomes de quem escreve agora (sinais dos ultimos 6s).
+// Nota: com varias instancias do servidor o indicador fica limitado a
+// instancia que recebeu o sinal - nas leituras devolve o que la existe.
+var ESCRITA_VALIDA_MS = 6000;
+var aEscreverPorConversa = new Map();
+
+var limparEscritaAntiga = function () {
+  var agora = new Date().getTime();
+  aEscreverPorConversa.forEach(function (valor, chave) {
+    if (agora - valor.em > ESCRITA_VALIDA_MS * 2) aEscreverPorConversa.delete(chave);
+  });
+};
+
+var nomesAEcrever = function (conversaId, exceptoId) {
+  var agora = new Date().getTime();
+  var prefixo = String(conversaId) + ":";
+  var nomes = [];
+  aEscreverPorConversa.forEach(function (valor, chave) {
+    if (chave.indexOf(prefixo) !== 0) return;
+    if (chave === prefixo + String(exceptoId)) return;
+    if (agora - valor.em <= ESCRITA_VALIDA_MS) nomes.push(valor.nome);
+  });
+  return nomes;
+};
+
 var remetenteInclude = function () {
   return { model: Utilizador, as: "remetente", attributes: ["id", "nome_completo", "fotografia"] };
+};
+
+// Texto curto para a lista de conversas: usa o texto ou, quando a mensagem
+// so tem anexo, uma descricao do que foi enviado.
+var previaMensagem = function (mensagem) {
+  var texto = mensagem.texto ? String(mensagem.texto).trim() : "";
+  if (texto) return texto;
+  var tipo = String(mensagem.anexo_tipo || "").toLowerCase();
+  if (tipo.indexOf("audio/") === 0) return "Nota de voz";
+  if (tipo.indexOf("image/") === 0) return "Imagem";
+  return mensagem.anexo_nome || "Anexo";
 };
 
 // O canal geral e unico por organizacao; e criado a primeira vez que alguem
@@ -113,12 +152,13 @@ var listConversas = async function (req, res) {
         include: [remetenteInclude()],
       });
       if (ultima) {
-        item.ultima_mensagem = ultima.texto;
+        item.ultima_mensagem = previaMensagem(ultima);
         item.ultima_em = ultima.createdAt;
         item.ultimo_remetente = ultima.remetente ? ultima.remetente.nome_completo : null;
       }
 
       item.nao_lidas = await naoLidasDe(c.id, req.utilizador);
+      item.a_escrever = nomesAEcrever(c.id, eu);
 
       saida.push(item);
     }
@@ -277,8 +317,7 @@ var listMensagens = async function (req, res) {
 
     await marcarLido(conversa.id, req.utilizador.id);
 
-    var titulo = conversa.tipo === "geral" ? (conversa.titulo || "Geral") : null;
-    if (conversa.tipo === "direta") {
+    var titulo = conversa.tipo === "geral" ? (conversa.titulo || "Geral") : null;    if (conversa.tipo === "direta") {
       var outroPart = await ConversaParticipante.findOne({
         where: { conversa_id: conversa.id, utilizador_id: { [Op.ne]: req.utilizador.id } },
         include: [{ model: Utilizador, as: "utilizador", attributes: ["id", "nome_completo", "fotografia"] }],
@@ -293,6 +332,7 @@ var listMensagens = async function (req, res) {
         conversa: { id: conversa.id, tipo: conversa.tipo, titulo: titulo },
         mensagens: rows,
         total: count,
+        a_escrever: nomesAEcrever(conversa.id, req.utilizador.id),
       },
     });
   } catch (e) {
@@ -404,6 +444,9 @@ var enviarMensagem = async function (req, res) {
 
     var criada = await Mensagem.findByPk(mensagem.id, { include: [remetenteInclude()] });
 
+    // A mensagem chegou: deixa de aparecer como "a escrever" para os outros.
+    aEscreverPorConversa.delete(String(conversa.id) + ":" + String(eu));
+
     return res.status(201).json({ mensagem: "Mensagem enviada", dados: criada });
   } catch (e) {
     console.log("Erro ao enviar mensagem:", e.message);
@@ -498,4 +541,27 @@ var abrirConversa = async function (req, res) {
   }
 };
 
-module.exports = { listConversas, naoLidas, listarUtilizadores, listMensagens, enviarMensagem, baixarAnexo, abrirConversa };
+// Sinal de "estou a escrever" numa conversa. O ecra chama isto enquanto ha
+// texto no campo (com intervalo minimo no frontend); o sinal expira sozinho
+// ao fim de 6 segundos sem novos sinais.
+var sinalizarEscrita = async function (req, res) {
+  try {
+    var carregada = await carregarConversa(req);
+    if (carregada.erro) return res.status(carregada.erro.status).json({ error: carregada.erro.mensagem });
+
+    limparEscritaAntiga();
+
+    var nome = req.utilizador.nome_completo || req.utilizador.email || "Utilizador";
+    aEscreverPorConversa.set(
+      String(carregada.conversa.id) + ":" + String(req.utilizador.id),
+      { nome: nome, em: new Date().getTime() }
+    );
+
+    return res.status(200).json({ dados: { ok: true } });
+  } catch (e) {
+    console.log("Erro ao sinalizar escrita:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+module.exports = { listConversas, naoLidas, listarUtilizadores, listMensagens, enviarMensagem, baixarAnexo, abrirConversa, sinalizarEscrita };

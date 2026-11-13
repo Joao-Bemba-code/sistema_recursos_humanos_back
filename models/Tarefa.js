@@ -240,6 +240,25 @@ var TarefaAlocacao = sequelize.define("TarefaAlocacao", {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  motivo_correcao: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+    comment: "Motivo indicado pelo gestor ao solicitar correccao",
+  },
+  correcao_pedida_por: {
+    type: DataTypes.UUID,
+    allowNull: true,
+    comment: "Gestor que solicitou a correccao",
+  },
+  correcao_pedida_em: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+  prazo_correcao: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    comment: "Prazo dado ao colaborador para corrigir (vazio = 24h)",
+  },
 }, {
   tableName: "tarefa_alocacoes",
   timestamps: true,

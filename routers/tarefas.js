@@ -26,6 +26,7 @@ router.delete("/:id/alocacoes/:alocId", gestao(), tarefaController.removerAlocac
 router.put("/:id/alocacoes/:alocId/decisao", gestao(), tarefaController.decidirJustificativa);
 router.put("/:id/validar", gestao(), tarefaController.validar);
 router.put("/:id/reabrir", gestao(), tarefaController.reabrir);
+router.put("/:id/correcao", gestao(), tarefaController.solicitarCorrecao);
 router.put("/:id/cancelar", gestao(), tarefaController.cancelar);
 router.delete("/:id", requireModuloOuRole("tarefas", "delete", GESTORES[0], GESTORES[1], GESTORES[2], GESTORES[3]), tarefaController.remove);
 
