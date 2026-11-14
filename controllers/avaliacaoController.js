@@ -1,5 +1,6 @@
 var { Op } = require("sequelize");
 var { CicloAvaliacao, AvaliacaoDesempenho, Colaborador, Utilizador, TarefaAlocacao } = require("../models");
+var { ORG_INEXISTENTE, incluirColaboradorDaOrg } = require("../helpers/organizacao");
 var notificacaoController = require("./notificacaoController");
 
 // ==================== CICLOS ====================
@@ -12,7 +13,7 @@ var listCiclos = async function (req, res) {
     var search = req.query.search || "";
     var estado = req.query.estado;
 
-    var where = {};
+    var where = { organizacao_id: req.organizacao_id || ORG_INEXISTENTE };
     if (search) {
       where[Op.or] = [
         { nome: { [Op.like]: "%" + search + "%" } },
@@ -45,10 +46,11 @@ var listCiclos = async function (req, res) {
 
 var getCiclo = async function (req, res) {
   try {
-    var ciclo = await CicloAvaliacao.findByPk(req.params.id, {
+    var ciclo = await CicloAvaliacao.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
       include: [
-        { model: AvaliacaoDesempenho, as: "avaliacoes", include: [
-          { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
+        { model: AvaliacaoDesempenho, as: "avaliacoes", required: false, include: [
+          incluirColaboradorDaOrg(req.organizacao_id, ["id", "nome_completo", "numero_colaborador"]),
         ] },
       ],
     });
@@ -71,6 +73,11 @@ var createCiclo = async function (req, res) {
       return res.status(400).json({ error: "nome, data_inicio e data_fim sao obrigatorios" });
     }
 
+    if (!req.organizacao_id) {
+      return res.status(403).json({ error: "A sua conta nao esta associada a uma organizacao" });
+    }
+    dados.organizacao_id = req.organizacao_id;
+
     var ciclo = await CicloAvaliacao.create(dados);
 
     return res.status(201).json({
@@ -85,12 +92,14 @@ var createCiclo = async function (req, res) {
 
 var updateCiclo = async function (req, res) {
   try {
-    var ciclo = await CicloAvaliacao.findByPk(req.params.id);
+    var ciclo = await CicloAvaliacao.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
+    });
     if (!ciclo) {
       return res.status(404).json({ error: "Ciclo de avaliacao nao encontrado" });
     }
 
-    var camposProtegidos = ["id", "createdAt", "updatedAt"];
+    var camposProtegidos = ["id", "organizacao_id", "createdAt", "updatedAt"];
     var dadosActualizar = {};
 
     var keys = Object.keys(req.body);
@@ -113,7 +122,9 @@ var updateCiclo = async function (req, res) {
 
 var removeCiclo = async function (req, res) {
   try {
-    var ciclo = await CicloAvaliacao.findByPk(req.params.id);
+    var ciclo = await CicloAvaliacao.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
+    });
     if (!ciclo) {
       return res.status(404).json({ error: "Ciclo de avaliacao nao encontrado" });
     }
@@ -215,7 +226,9 @@ var autoCalculo = async function (req, res) {
       return res.status(400).json({ error: "ciclo_id e obrigatorio" });
     }
 
-    var ciclo = await CicloAvaliacao.findByPk(cicloId);
+    var ciclo = await CicloAvaliacao.findOne({
+      where: { id: cicloId, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
+    });
     if (!ciclo) {
       return res.status(404).json({ error: "Ciclo de avaliacao nao encontrado" });
     }
@@ -254,7 +267,7 @@ var listAvaliacoes = async function (req, res) {
 
     var include = [
       { model: CicloAvaliacao, as: "ciclo", attributes: ["id", "nome", "data_inicio", "data_fim"] },
-      { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
+      incluirColaboradorDaOrg(req.organizacao_id, ["id", "nome_completo", "numero_colaborador"]),
     ];
 
     if (search) {
@@ -264,6 +277,7 @@ var listAvaliacoes = async function (req, res) {
     var { count, rows } = await AvaliacaoDesempenho.findAndCountAll({
       where: where,
       include: include,
+      distinct: true,
       order: [["createdAt", "DESC"]],
       limit: limit,
       offset: offset,
@@ -297,7 +311,9 @@ var createAvaliacao = async function (req, res) {
       return res.status(400).json({ error: "ciclo_id e obrigatorio" });
     }
 
-    var ciclo = await CicloAvaliacao.findByPk(dados.ciclo_id);
+    var ciclo = await CicloAvaliacao.findOne({
+      where: { id: dados.ciclo_id, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
+    });
     if (!ciclo) {
       return res.status(400).json({ error: "Ciclo de avaliacao nao encontrado" });
     }
@@ -350,7 +366,10 @@ var createAvaliacao = async function (req, res) {
 
 var updateAvaliacao = async function (req, res) {
   try {
-    var avaliacao = await AvaliacaoDesempenho.findByPk(req.params.id);
+    var avaliacao = await AvaliacaoDesempenho.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(req.organizacao_id, ["id"])],
+    });
     if (!avaliacao) {
       return res.status(404).json({ error: "Avaliacao de desempenho nao encontrada" });
     }
@@ -403,7 +422,7 @@ var updateAvaliacao = async function (req, res) {
     var actualizado = await AvaliacaoDesempenho.findByPk(req.params.id, {
       include: [
         { model: CicloAvaliacao, as: "ciclo", attributes: ["id", "nome"] },
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
+        incluirColaboradorDaOrg(req.organizacao_id, ["id", "nome_completo", "numero_colaborador"]),
       ],
     });
 

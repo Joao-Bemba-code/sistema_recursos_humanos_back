@@ -1,5 +1,6 @@
 var { Op } = require("sequelize");
 var { sequelize, Credito, CreditoMovimento, Colaborador } = require("../models");
+var { orgDaSessao, incluirColaboradorDaOrg, colaboradorNaOrg } = require("../helpers/organizacao");
 
 var arredondar = function (v) { return Math.round(v * 100) / 100; };
 var toNum = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; };
@@ -205,12 +206,11 @@ var listCreditos = async function (req, res) {
     if (estado) where.estado = estado;
     if (colaborador_id) where.colaborador_id = colaborador_id;
 
-    var include = [
-      { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
-    ];
+    // O credito pertence a organizacao do colaborador: filtra sempre por ela.
+    var include = [incluirColaboradorDaOrg(orgDaSessao(req))];
 
     if (search) {
-      include[0].where = { nome_completo: { [Op.like]: "%" + search + "%" } };
+      include[0].where.nome_completo = { [Op.like]: "%" + search + "%" };
     }
 
     var { count, rows } = await Credito.findAndCountAll({
@@ -238,10 +238,11 @@ var listCreditos = async function (req, res) {
 
 var getCredito = async function (req, res) {
   try {
-    var credito = await Credito.findByPk(req.params.id, {
+    var credito = await Credito.findOne({
+      where: { id: req.params.id },
       include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
-        { model: CreditoMovimento, as: "movimentos", order: [["ano", "DESC"], ["mes", "DESC"]] },
+        incluirColaboradorDaOrg(orgDaSessao(req)),
+        { model: CreditoMovimento, as: "movimentos", separate: true, order: [["ano", "DESC"], ["mes", "DESC"]] },
       ],
     });
 
@@ -261,7 +262,9 @@ var getCredito = async function (req, res) {
 
 var getResumo = async function (req, res) {
   try {
-    var ativos = await Credito.findAll({ where: { estado: "Ativo" } });
+    var comOrg = function () { return [incluirColaboradorDaOrg(orgDaSessao(req), ["id"])]; };
+
+    var ativos = await Credito.findAll({ where: { estado: "Ativo" }, include: comOrg() });
 
     var totalEmprestado = 0;
     var dividaTotal = 0;
@@ -274,7 +277,7 @@ var getResumo = async function (req, res) {
       totalPago = arredondar(totalPago + toNum(c.valor_pago));
     }
 
-    var outrosPagos = await Credito.findAll({ where: { estado: "Pago" } });
+    var outrosPagos = await Credito.findAll({ where: { estado: "Pago" }, include: comOrg() });
     for (var j = 0; j < outrosPagos.length; j++) {
       totalPago = arredondar(totalPago + toNum(outrosPagos[j].valor_pago));
     }
@@ -310,9 +313,8 @@ var createCredito = async function (req, res) {
       return res.status(400).json({ error: erroValidacao });
     }
 
-    var colaborador = await Colaborador.findByPk(dados.colaborador_id);
-    if (!colaborador) {
-      return res.status(404).json({ error: "Colaborador nao encontrado" });
+    if (!(await colaboradorNaOrg(dados.colaborador_id, orgDaSessao(req)))) {
+      return res.status(404).json({ error: "Colaborador nao encontrado nesta organizacao" });
     }
 
     var credito = await Credito.create({
@@ -338,7 +340,10 @@ var createCredito = async function (req, res) {
 
 var updateCredito = async function (req, res) {
   try {
-    var credito = await Credito.findByPk(req.params.id);
+    var credito = await Credito.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req), ["id"])],
+    });
     if (!credito) {
       return res.status(404).json({ error: "Credito nao encontrado" });
     }
@@ -377,10 +382,9 @@ var updateCredito = async function (req, res) {
 
     await credito.update(dadosActualizar);
 
-    var actualizado = await Credito.findByPk(req.params.id, {
-      include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
-      ],
+    var actualizado = await Credito.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req))],
     });
 
     return res.status(200).json({
@@ -395,7 +399,10 @@ var updateCredito = async function (req, res) {
 
 var cancelarCredito = async function (req, res) {
   try {
-    var credito = await Credito.findByPk(req.params.id);
+    var credito = await Credito.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req), ["id"])],
+    });
     if (!credito) {
       return res.status(404).json({ error: "Credito nao encontrado" });
     }
@@ -419,7 +426,10 @@ var cancelarCredito = async function (req, res) {
 
 var removeCredito = async function (req, res) {
   try {
-    var credito = await Credito.findByPk(req.params.id);
+    var credito = await Credito.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req), ["id"])],
+    });
     if (!credito) {
       return res.status(404).json({ error: "Credito nao encontrado" });
     }
@@ -444,7 +454,12 @@ var removeCredito = async function (req, res) {
 var regularizarMes = async function (req, res) {
   var t = await sequelize.transaction();
   try {
-    var credito = await Credito.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+    var credito = await Credito.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req), ["id"])],
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
     if (!credito) {
       await t.rollback();
       return res.status(404).json({ error: "Credito nao encontrado" });
@@ -513,10 +528,11 @@ var regularizarMes = async function (req, res) {
 
     await t.commit();
 
-    var actualizado = await Credito.findByPk(req.params.id, {
+    var actualizado = await Credito.findOne({
+      where: { id: req.params.id },
       include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
-        { model: CreditoMovimento, as: "movimentos", order: [["ano", "DESC"], ["mes", "DESC"]] },
+        incluirColaboradorDaOrg(orgDaSessao(req)),
+        { model: CreditoMovimento, as: "movimentos", separate: true, order: [["ano", "DESC"], ["mes", "DESC"]] },
       ],
     });
     var dados = actualizado.toJSON();

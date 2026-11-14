@@ -1,5 +1,6 @@
 var { Op } = require("sequelize");
 var { Colaborador, Utilizador, ConvocatoriaDisciplinar, MedidaDisciplinar } = require("../models");
+var { ORG_INEXISTENTE } = require("../helpers/organizacao");
 var notificacaoController = require("./notificacaoController");
 
 // Valores internos (sem acentos) e respectivas etiquetas usadas no ecra.
@@ -45,17 +46,16 @@ var horaValida = function (valor) {
 };
 
 var obterColaborador = async function (req, id) {
-  var colaborador = await Colaborador.findByPk(id);
+  var colaborador = await Colaborador.findOne({
+    where: { id: id, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
+  });
   if (!colaborador) throw erro(404, "Colaborador não encontrado");
-  if (colaborador.organizacao_id && req.organizacao_id && String(colaborador.organizacao_id) !== String(req.organizacao_id)) {
-    throw erro(404, "Colaborador não encontrado");
-  }
   return colaborador;
 };
 
 var scopedWhere = function (req, extra) {
   var where = Object.assign({}, extra || {});
-  if (req.organizacao_id) where.organizacao_id = req.organizacao_id;
+  where.organizacao_id = req.organizacao_id || ORG_INEXISTENTE;
   return where;
 };
 
@@ -211,7 +211,7 @@ var createConvocatoria = async function (req, res) {
     if (!dados.numero_processo) dados.numero_processo = await gerarNumeroProcesso(req);
     validarConvocatoria(dados);
     var colaborador = await obterColaborador(req, dados.colaborador_id);
-    dados.organizacao_id = req.organizacao_id || colaborador.organizacao_id || null;
+    dados.organizacao_id = req.organizacao_id;
     dados.emitido_por = req.utilizador ? req.utilizador.id : null;
 
     var conv = await ConvocatoriaDisciplinar.create(dados);
@@ -431,7 +431,7 @@ var createMedida = async function (req, res) {
     if (!dados.numero_processo) dados.numero_processo = await gerarNumeroProcesso(req);
     validarMedida(dados);
     var colaborador = await obterColaborador(req, dados.colaborador_id);
-    dados.organizacao_id = req.organizacao_id || colaborador.organizacao_id || null;
+    dados.organizacao_id = req.organizacao_id;
     dados.registado_por = req.utilizador ? req.utilizador.id : null;
 
     var medida = await MedidaDisciplinar.create(dados);

@@ -1,5 +1,6 @@
 var { Op } = require("sequelize");
 var { CursoFormacao, InscricaoFormacao, Colaborador } = require("../models");
+var { ORG_INEXISTENTE, orgDaSessao, incluirColaboradorDaOrg, colaboradorNaOrg } = require("../helpers/organizacao");
 
 // ==================== CURSOS ====================
 
@@ -12,7 +13,7 @@ var listCursos = async function (req, res) {
     var estado = req.query.estado;
     var tipo = req.query.tipo;
 
-    var where = {};
+    var where = { organizacao_id: orgDaSessao(req) || ORG_INEXISTENTE };
     if (search) {
       where[Op.or] = [
         { nome: { [Op.like]: "%" + search + "%" } },
@@ -48,19 +49,25 @@ var listCursos = async function (req, res) {
 
 var getCurso = async function (req, res) {
   try {
-    var curso = await CursoFormacao.findByPk(req.params.id, {
-      include: [
-        { model: InscricaoFormacao, as: "inscricoes", include: [
-          { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
-        ] },
-      ],
+    var curso = await CursoFormacao.findOne({
+      where: { id: req.params.id, organizacao_id: orgDaSessao(req) || ORG_INEXISTENTE },
     });
 
     if (!curso) {
       return res.status(404).json({ error: "Curso de formacao nao encontrado" });
     }
 
-    return res.status(200).json({ dados: curso });
+    // Inscricoes so de colaboradores da organizacao da sessao.
+    var inscricoes = await InscricaoFormacao.findAll({
+      where: { curso_id: curso.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req), ["id", "nome_completo", "numero_colaborador"])],
+      order: [["data_inscricao", "DESC"]],
+    });
+
+    var dados = curso.toJSON();
+    dados.inscricoes = inscricoes;
+
+    return res.status(200).json({ dados: dados });
   } catch (e) {
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
@@ -74,7 +81,13 @@ var createCurso = async function (req, res) {
       return res.status(400).json({ error: "nome e obrigatorio" });
     }
 
-    var curso = await CursoFormacao.create(dados);
+    if (!orgDaSessao(req)) {
+      return res.status(403).json({ error: "Conta sem organizacao associada" });
+    }
+
+    // A organizacao vem sempre da sessao, nunca do corpo do pedido.
+    var corpo = Object.assign({}, dados, { organizacao_id: orgDaSessao(req) });
+    var curso = await CursoFormacao.create(corpo);
 
     return res.status(201).json({
       mensagem: "Curso de formacao criado com sucesso",
@@ -88,12 +101,14 @@ var createCurso = async function (req, res) {
 
 var updateCurso = async function (req, res) {
   try {
-    var curso = await CursoFormacao.findByPk(req.params.id);
+    var curso = await CursoFormacao.findOne({
+      where: { id: req.params.id, organizacao_id: orgDaSessao(req) || ORG_INEXISTENTE },
+    });
     if (!curso) {
       return res.status(404).json({ error: "Curso de formacao nao encontrado" });
     }
 
-    var camposProtegidos = ["id", "createdAt", "updatedAt"];
+    var camposProtegidos = ["id", "organizacao_id", "createdAt", "updatedAt"];
     var dadosActualizar = {};
 
     var keys = Object.keys(req.body);
@@ -116,12 +131,14 @@ var updateCurso = async function (req, res) {
 
 var removeCurso = async function (req, res) {
   try {
-    var curso = await CursoFormacao.findByPk(req.params.id);
+    var curso = await CursoFormacao.findOne({
+      where: { id: req.params.id, organizacao_id: orgDaSessao(req) || ORG_INEXISTENTE },
+    });
     if (!curso) {
       return res.status(404).json({ error: "Curso de formacao nao encontrado" });
     }
 
-    var temInscricoes = await InscricaoFormacao.count({ where: { curso_id: req.params.id } });
+    var temInscricoes = await InscricaoFormacao.count({ where: { curso_id: curso.id } });
     if (temInscricoes > 0) {
       return res.status(400).json({ error: "Nao e possivel eliminar curso com inscricoes associadas" });
     }
@@ -152,12 +169,18 @@ var listInscricoes = async function (req, res) {
     if (colaborador_id) where.colaborador_id = colaborador_id;
 
     var include = [
-      { model: CursoFormacao, as: "curso", attributes: ["id", "nome", "tipo", "data_inicio", "data_fim"] },
-      { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
+      {
+        model: CursoFormacao,
+        as: "curso",
+        attributes: ["id", "nome", "tipo", "data_inicio", "data_fim"],
+        where: { organizacao_id: orgDaSessao(req) || ORG_INEXISTENTE },
+        required: true,
+      },
+      incluirColaboradorDaOrg(orgDaSessao(req), ["id", "nome_completo", "numero_colaborador"]),
     ];
 
     if (search) {
-      include[0].where = { nome: { [Op.like]: "%" + search + "%" } };
+      include[0].where.nome = { [Op.like]: "%" + search + "%" };
     }
 
     var { count, rows } = await InscricaoFormacao.findAndCountAll({
@@ -191,9 +214,16 @@ var createInscricao = async function (req, res) {
       return res.status(400).json({ error: "curso_id e colaborador_id sao obrigatorios" });
     }
 
-    var curso = await CursoFormacao.findByPk(dados.curso_id);
+    var curso = await CursoFormacao.findOne({
+      where: { id: dados.curso_id, organizacao_id: orgDaSessao(req) || ORG_INEXISTENTE },
+    });
     if (!curso) {
       return res.status(404).json({ error: "Curso de formacao nao encontrado" });
+    }
+
+    var colaboradorValido = await colaboradorNaOrg(dados.colaborador_id, orgDaSessao(req));
+    if (!colaboradorValido) {
+      return res.status(404).json({ error: "Colaborador nao encontrado nesta organizacao" });
     }
 
     if (curso.vagas) {
@@ -226,7 +256,19 @@ var createInscricao = async function (req, res) {
 
 var updateInscricao = async function (req, res) {
   try {
-    var inscricao = await InscricaoFormacao.findByPk(req.params.id);
+    var inscricao = await InscricaoFormacao.findOne({
+      where: { id: req.params.id },
+      include: [
+        {
+          model: CursoFormacao,
+          as: "curso",
+          attributes: ["id"],
+          where: { organizacao_id: orgDaSessao(req) || ORG_INEXISTENTE },
+          required: true,
+        },
+        incluirColaboradorDaOrg(orgDaSessao(req), ["id"]),
+      ],
+    });
     if (!inscricao) {
       return res.status(404).json({ error: "Inscricao nao encontrada" });
     }
@@ -250,7 +292,8 @@ var updateInscricao = async function (req, res) {
 
     await inscricao.update(dadosActualizar);
 
-    var actualizado = await InscricaoFormacao.findByPk(req.params.id, {
+    var actualizado = await InscricaoFormacao.findOne({
+      where: { id: inscricao.id },
       include: [
         { model: CursoFormacao, as: "curso", attributes: ["id", "nome", "tipo"] },
         { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },

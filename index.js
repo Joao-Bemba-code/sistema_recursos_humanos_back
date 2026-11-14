@@ -20,6 +20,7 @@ var authRoutes = require("./routers/auth");
 var userRoutes = require("./routers/users");
 var perfilRoutes = require("./routers/perfis");
 var organizacaoRoutes = require("./routers/organizacoes");
+var plataformaRoutes = require("./routers/plataforma");
 var colaboradorRoutes = require("./routers/colaboradores");
 var departamentoRoutes = require("./routers/departamentos");
 var seccaoRoutes = require("./routers/seccoes");
@@ -118,6 +119,9 @@ app.use("/auth", authRoutes);
 // Rotas protegidas
 app.use("/api/users", authenticate, userRoutes);
 app.use("/api/perfis", authenticate, perfilRoutes);
+// A autenticacao da plataforma e feita dentro do proprio router, porque o
+// login (/api/plataforma/login) tem de ser publico.
+app.use("/api/plataforma", plataformaRoutes);
 app.use("/api/organizacoes", authenticate, organizacaoRoutes);
 app.use("/api/colaboradores", authenticate, colaboradorRoutes);
 app.use("/api/departamentos", authenticate, departamentoRoutes);

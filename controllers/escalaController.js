@@ -1,5 +1,6 @@
 var { Op } = require("sequelize");
 var { Colaborador, EscalaSemanal } = require("../models");
+var { ORG_INEXISTENTE } = require("../helpers/organizacao");
 var biometroController = require("./biometroController");
 
 // Valida "HH:MM" (ou vazio/nulo = descanso). Devolve a hora normalizada,
@@ -20,8 +21,7 @@ var validarHora = function (texto) {
 // da ficha + horario global 08:00/16:00) com a flag tem_escala=false.
 var list = async function (req, res) {
   try {
-    var where = {};
-    if (req.organizacao_id) where.organizacao_id = req.organizacao_id;
+    var where = { organizacao_id: req.organizacao_id || ORG_INEXISTENTE };
 
     var colaboradores = await Colaborador.findAll({
       where: where,
@@ -88,7 +88,12 @@ var list = async function (req, res) {
 // dias que passaram a ser descanso sao removidos.
 var update = async function (req, res) {
   try {
-    var colab = await Colaborador.findByPk(req.params.colaboradorId);
+    var colab = await Colaborador.findOne({
+      where: {
+        id: req.params.colaboradorId,
+        organizacao_id: req.organizacao_id || ORG_INEXISTENTE,
+      },
+    });
     if (!colab) {
       return res.status(404).json({ error: "Colaborador não encontrado" });
     }

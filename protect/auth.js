@@ -40,6 +40,12 @@ var authenticate = async (req, res, next) => {
       return res.status(403).json({ error: "Conta bloqueada. Contacte o administrador." });
     }
 
+    // Organizacao desactivada pela plataforma: ninguem dessa org entra.
+    // O super-admin nao tem organizacao, por isso nao e afectado.
+    if (utilizador.organizacao && utilizador.organizacao.activo === false) {
+      return res.status(403).json({ error: "Organização desactivada. Contacte o suporte." });
+    }
+
     prepararUtilizador(utilizador);
 
     req.utilizador = utilizador;

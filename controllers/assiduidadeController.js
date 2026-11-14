@@ -1,5 +1,6 @@
 var { Op } = require("sequelize");
 var { RegistoPresenca, Colaborador } = require("../models");
+var { orgDaSessao, incluirColaboradorDaOrg, colaboradorNaOrg } = require("../helpers/organizacao");
 
 // Valores aceitos pela coluna ENUM no MySQL (sem acentos).
 var ESTADOS_VALIDOS = ["Presente", "Ausente", "Atrasado", "Licenca", "Ferias", "Fim_semana", "Em_Curso"];
@@ -83,6 +84,7 @@ var list = async function (req, res) {
     if (search) {
       var colabsEncontrados = await Colaborador.findAll({
         where: {
+          organizacao_id: orgDaSessao(req) || "00000000-0000-0000-0000-000000000000",
           [Op.or]: [
             { nome_completo: { [Op.like]: "%" + search + "%" } },
             { numero_colaborador: { [Op.like]: "%" + search + "%" } },
@@ -110,9 +112,8 @@ var list = async function (req, res) {
 
     var { count, rows } = await RegistoPresenca.findAndCountAll({
       where: where,
-      include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
-      ],
+      include: [incluirColaboradorDaOrg(orgDaSessao(req))],
+      distinct: true,
       order: [["data", "DESC"], ["hora_entrada", "DESC"]],
       limit: limit,
       offset: offset,
@@ -135,10 +136,9 @@ var list = async function (req, res) {
 
 var getById = async function (req, res) {
   try {
-    var registo = await RegistoPresenca.findByPk(req.params.id, {
-      include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
-      ],
+    var registo = await RegistoPresenca.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req))],
     });
 
     if (!registo) {
@@ -157,6 +157,11 @@ var create = async function (req, res) {
 
     if (!corpo.colaborador_id || !corpo.data) {
       return res.status(400).json({ error: "colaborador_id e data sao obrigatorios" });
+    }
+
+    var colaboradorValido = await colaboradorNaOrg(corpo.colaborador_id, orgDaSessao(req));
+    if (!colaboradorValido) {
+      return res.status(404).json({ error: "Colaborador nao encontrado nesta organizacao" });
     }
 
     // So aceita os campos de assiduidade (evita gravar campos internos por engano)
@@ -196,7 +201,10 @@ var create = async function (req, res) {
 
 var update = async function (req, res) {
   try {
-    var registo = await RegistoPresenca.findByPk(req.params.id);
+    var registo = await RegistoPresenca.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req), ["id"])],
+    });
     if (!registo) {
       return res.status(404).json({ error: "Registo de presenca nao encontrado" });
     }
@@ -235,10 +243,9 @@ var update = async function (req, res) {
 
     await registo.update(dadosActualizar);
 
-    var actualizado = await RegistoPresenca.findByPk(req.params.id, {
-      include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
-      ],
+    var actualizado = await RegistoPresenca.findOne({
+      where: { id: registo.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req))],
     });
 
     return res.status(200).json({
@@ -253,7 +260,10 @@ var update = async function (req, res) {
 
 var remove = async function (req, res) {
   try {
-    var registo = await RegistoPresenca.findByPk(req.params.id);
+    var registo = await RegistoPresenca.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req), ["id"])],
+    });
     if (!registo) {
       return res.status(404).json({ error: "Registo de presenca nao encontrado" });
     }

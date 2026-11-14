@@ -1,6 +1,7 @@
 var ExcelJS = require("exceljs");
 var { Pagamento, Colaborador, Organizacao } = require("../models");
 var { listarPagamentosParaResumo } = require("./folhaSalarialController");
+var { incluirColaboradorDaOrg } = require("../helpers/organizacao");
 
 var MESES = ["Janeiro", "Fevereiro", "Marco", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 
@@ -91,7 +92,7 @@ exports.resumoPagamentos = async function (req, res) {
     }
     var mostrarUnidade = unidade && unidade !== "Todas";
 
-    var pagamentos = await listarPagamentosParaResumo(mes, ano, unidade);
+    var pagamentos = await listarPagamentosParaResumo(mes, ano, unidade, req.organizacao_id);
     if (pagamentos.length === 0) {
       return res.status(404).json({ error: "Nenhum pagamento encontrado para o periodo indicado" + (mostrarUnidade ? " na unidade " + unidade : "") });
     }
@@ -308,8 +309,14 @@ exports.resumoPagamentos = async function (req, res) {
 
 exports.folhaSalarial = async function (req, res) {
   try {
-    var pagamento = await Pagamento.findByPk(req.params.id, {
-      include: [{ model: Colaborador, as: "colaborador" }],
+    var pagamento = await Pagamento.findOne({
+      where: { id: req.params.id },
+      include: [
+        incluirColaboradorDaOrg(req.organizacao_id, [
+          "id", "nome_completo", "numero_colaborador", "nif", "numero_seguranca_social",
+          "conta_bancaria", "iban", "banco", "organizacao_id", "unidade_negocio",
+        ]),
+      ],
     });
     if (!pagamento) {
       return res.status(404).json({ error: "Pagamento nao encontrado" });

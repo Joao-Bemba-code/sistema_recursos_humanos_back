@@ -1,5 +1,6 @@
 var { Op } = require("sequelize");
 var { SolicitacaoFerias, Colaborador } = require("../models");
+var { orgDaSessao, incluirColaboradorDaOrg, colaboradorNaOrg } = require("../helpers/organizacao");
 
 var list = async function (req, res) {
   try {
@@ -9,11 +10,13 @@ var list = async function (req, res) {
     var search = req.query.search || "";
     var estado = req.query.estado;
     var colaborador_id = req.query.colaborador_id;
+    var orgId = orgDaSessao(req);
 
     var where = {};
     if (search) {
       var colabsEncontrados = await Colaborador.findAll({
         where: {
+          organizacao_id: orgId || "00000000-0000-0000-0000-000000000000",
           [Op.or]: [
             { nome_completo: { [Op.like]: "%" + search + "%" } },
             { numero_colaborador: { [Op.like]: "%" + search + "%" } },
@@ -36,9 +39,7 @@ var list = async function (req, res) {
 
     var { count, rows } = await SolicitacaoFerias.findAndCountAll({
       where: where,
-      include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
-      ],
+      include: [incluirColaboradorDaOrg(orgId)],
       order: [["createdAt", "DESC"]],
       limit: limit,
       offset: offset,
@@ -61,10 +62,9 @@ var list = async function (req, res) {
 
 var getById = async function (req, res) {
   try {
-    var solicitacao = await SolicitacaoFerias.findByPk(req.params.id, {
-      include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
-      ],
+    var solicitacao = await SolicitacaoFerias.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req))],
     });
 
     if (!solicitacao) {
@@ -85,6 +85,10 @@ var create = async function (req, res) {
       return res.status(400).json({ error: "colaborador_id, data_inicio, data_fim e dias_solicitados sao obrigatorios" });
     }
 
+    if (!(await colaboradorNaOrg(dados.colaborador_id, orgDaSessao(req)))) {
+      return res.status(404).json({ error: "Colaborador não encontrado nesta organização" });
+    }
+
     var solicitacao = await SolicitacaoFerias.create(dados);
 
     return res.status(201).json({
@@ -99,7 +103,10 @@ var create = async function (req, res) {
 
 var update = async function (req, res) {
   try {
-    var solicitacao = await SolicitacaoFerias.findByPk(req.params.id);
+    var solicitacao = await SolicitacaoFerias.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req), ["id"])],
+    });
     if (!solicitacao) {
       return res.status(404).json({ error: "Solicitacao de ferias nao encontrada" });
     }
@@ -121,10 +128,9 @@ var update = async function (req, res) {
 
     await solicitacao.update(dadosActualizar);
 
-    var actualizado = await SolicitacaoFerias.findByPk(req.params.id, {
-      include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] },
-      ],
+    var actualizado = await SolicitacaoFerias.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req))],
     });
 
     return res.status(200).json({
@@ -138,7 +144,10 @@ var update = async function (req, res) {
 
 var remove = async function (req, res) {
   try {
-    var solicitacao = await SolicitacaoFerias.findByPk(req.params.id);
+    var solicitacao = await SolicitacaoFerias.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req), ["id"])],
+    });
     if (!solicitacao) {
       return res.status(404).json({ error: "Solicitacao de ferias nao encontrada" });
     }

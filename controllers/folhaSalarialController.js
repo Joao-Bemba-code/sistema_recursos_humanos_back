@@ -1,6 +1,7 @@
 var { Op } = require("sequelize");
 var { sequelize, Vencimento, Pagamento, Colaborador, RegistoPresenca, Credito, CreditoMovimento } = require("../models");
 var { calcularDescontosCreditos, registarDescontosCreditos } = require("./creditoController");
+var { ORG_INEXISTENTE, incluirColaboradorDaOrg, colaboradorNaOrg } = require("../helpers/organizacao");
 
 // ==================== IMPOSTOS ANGOLA (IRT 2026 / INSS) ====================
 
@@ -104,21 +105,20 @@ var listVencimentos = async function (req, res) {
     if (colaborador_id) where.colaborador_id = colaborador_id;
 
     var include = [
-      { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco"] },
+      incluirColaboradorDaOrg(req.organizacao_id, ["id", "nome_completo", "numero_colaborador", "iban", "banco"]),
     ];
 
     if (search) {
-      include[0].where = {
-        [Op.or]: [
-          { nome_completo: { [Op.like]: "%" + search + "%" } },
-          { numero_colaborador: { [Op.like]: "%" + search + "%" } },
-        ],
-      };
+      include[0].where[Op.or] = [
+        { nome_completo: { [Op.like]: "%" + search + "%" } },
+        { numero_colaborador: { [Op.like]: "%" + search + "%" } },
+      ];
     }
 
     var { count, rows } = await Vencimento.findAndCountAll({
       where: where,
       include: include,
+      distinct: true,
       order: [["data_inicio", "DESC"]],
       limit: limit,
       offset: offset,
@@ -141,9 +141,10 @@ var listVencimentos = async function (req, res) {
 
 var getVencimento = async function (req, res) {
   try {
-    var vencimento = await Vencimento.findByPk(req.params.id, {
+    var vencimento = await Vencimento.findOne({
+      where: { id: req.params.id },
       include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco"] },
+        incluirColaboradorDaOrg(req.organizacao_id, ["id", "nome_completo", "numero_colaborador", "iban", "banco"]),
       ],
     });
 
@@ -340,6 +341,9 @@ var calcularValorHorasExtras = async function (colaborador_id, mes, ano, salario
 var getContratoActual = async function (req, res) {
   try {
     var { colaborador_id } = req.params;
+    if (!(await colaboradorNaOrg(colaborador_id, req.organizacao_id))) {
+      return res.status(404).json({ error: "Colaborador nao encontrado" });
+    }
     console.log("DEBUG buscar contrato para:", colaborador_id);
     var contrato = await sequelize.query(
       "SELECT salario_base, subsidio_alimentacao FROM contratos WHERE colaborador_id = ? AND estado = 'Activo' ORDER BY createdAt DESC LIMIT 1",
@@ -371,6 +375,10 @@ var createVencimento = async function (req, res) {
       return res.status(400).json({ error: "colaborador_id, salario_base e data_inicio sao obrigatorios" });
     }
 
+    if (!(await colaboradorNaOrg(dados.colaborador_id, req.organizacao_id))) {
+      return res.status(404).json({ error: "Colaborador nao encontrado" });
+    }
+
     dados = calcularTotais(dados);
 
     if (!dados.total_bruto) dados.total_bruto = dados.salario_base;
@@ -390,7 +398,10 @@ var createVencimento = async function (req, res) {
 
 var updateVencimento = async function (req, res) {
   try {
-    var vencimento = await Vencimento.findByPk(req.params.id);
+    var vencimento = await Vencimento.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(req.organizacao_id, ["id"])],
+    });
     if (!vencimento) {
       return res.status(404).json({ error: "Vencimento nao encontrado" });
     }
@@ -424,7 +435,7 @@ var updateVencimento = async function (req, res) {
 
     var actualizado = await Vencimento.findByPk(req.params.id, {
       include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco"] },
+        incluirColaboradorDaOrg(req.organizacao_id, ["id", "nome_completo", "numero_colaborador", "iban", "banco"]),
       ],
     });
 
@@ -439,7 +450,10 @@ var updateVencimento = async function (req, res) {
 
 var removeVencimentos = async function (req, res) {
   try {
-    var vencimento = await Vencimento.findByPk(req.params.id);
+    var vencimento = await Vencimento.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(req.organizacao_id, ["id"])],
+    });
     if (!vencimento) {
       return res.status(404).json({ error: "Vencimento nao encontrado" });
     }
@@ -472,21 +486,20 @@ var listPagamentos = async function (req, res) {
     if (ano) where.ano = ano;
 
     var include = [
-      { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco"] },
+      incluirColaboradorDaOrg(req.organizacao_id, ["id", "nome_completo", "numero_colaborador", "iban", "banco"]),
     ];
 
     if (search) {
-      include[0].where = {
-        [Op.or]: [
-          { nome_completo: { [Op.like]: "%" + search + "%" } },
-          { numero_colaborador: { [Op.like]: "%" + search + "%" } },
-        ],
-      };
+      include[0].where[Op.or] = [
+        { nome_completo: { [Op.like]: "%" + search + "%" } },
+        { numero_colaborador: { [Op.like]: "%" + search + "%" } },
+      ];
     }
 
     var { count, rows } = await Pagamento.findAndCountAll({
       where: where,
       include: include,
+      distinct: true,
       order: [["ano", "DESC"], ["mes", "DESC"]],
       limit: limit,
       offset: offset,
@@ -513,6 +526,10 @@ var createPagamento = async function (req, res) {
 
     if (!dados.colaborador_id || !dados.mes || !dados.ano) {
       return res.status(400).json({ error: "colaborador_id, mes e ano sao obrigatorios" });
+    }
+
+    if (!(await colaboradorNaOrg(dados.colaborador_id, req.organizacao_id))) {
+      return res.status(404).json({ error: "Colaborador nao encontrado" });
     }
 
     var existente = await Pagamento.findOne({
@@ -602,7 +619,10 @@ var createPagamento = async function (req, res) {
 
 var updatePagamento = async function (req, res) {
   try {
-    var pagamento = await Pagamento.findByPk(req.params.id);
+    var pagamento = await Pagamento.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(req.organizacao_id, ["id"])],
+    });
     if (!pagamento) {
       return res.status(404).json({ error: "Pagamento nao encontrado" });
     }
@@ -642,7 +662,7 @@ var updatePagamento = async function (req, res) {
 
     var actualizado = await Pagamento.findByPk(req.params.id, {
       include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco"] },
+        incluirColaboradorDaOrg(req.organizacao_id, ["id", "nome_completo", "numero_colaborador", "iban", "banco"]),
       ],
     });
 
@@ -658,7 +678,10 @@ var updatePagamento = async function (req, res) {
 
 var recalcularFaltas = async function (req, res) {
   try {
-    var pagamento = await Pagamento.findByPk(req.params.id);
+    var pagamento = await Pagamento.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(req.organizacao_id, ["id"])],
+    });
     if (!pagamento) {
       return res.status(404).json({ error: "Pagamento nao encontrado" });
     }
@@ -682,7 +705,7 @@ var recalcularFaltas = async function (req, res) {
 
     var actualizado = await Pagamento.findByPk(req.params.id, {
       include: [
-        { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco"] },
+        incluirColaboradorDaOrg(req.organizacao_id, ["id", "nome_completo", "numero_colaborador", "iban", "banco"]),
       ],
     });
 
@@ -699,7 +722,11 @@ var recalcularFaltas = async function (req, res) {
 var removePagamento = async function (req, res) {
   var t = await sequelize.transaction();
   try {
-    var pagamento = await Pagamento.findByPk(req.params.id, { transaction: t });
+    var pagamento = await Pagamento.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(req.organizacao_id, ["id"])],
+      transaction: t,
+    });
     if (!pagamento) {
       await t.rollback();
       return res.status(404).json({ error: "Pagamento nao encontrado" });
@@ -787,7 +814,10 @@ var gerarPagamentosAutomaticos = async function (req, res) {
     var dataPagamento = marcarPago ? formatarDataLocal(new Date()) : null;
 
     // Colaboradores ativos (de todas as unidades ou so da unidade escolhida)
-    var whereColaboradores = { estado: "Activo" };
+    var whereColaboradores = {
+      estado: "Activo",
+      organizacao_id: req.organizacao_id || ORG_INEXISTENTE,
+    };
     if (unidade) whereColaboradores.unidade_negocio = unidade;
 
     var colaboradores = await Colaborador.findAll({
@@ -924,14 +954,14 @@ var gerarPagamentosAutomaticos = async function (req, res) {
 
 // ==================== RESUMO PDF (dados) ====================
 
-var listarPagamentosParaResumo = async function (mes, ano, unidade_negocio) {
+var listarPagamentosParaResumo = async function (mes, ano, unidade_negocio, orgId) {
   var where = { mes: mes, ano: ano };
   var include = [
-    { model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador", "iban", "banco", "organizacao_id", "unidade_negocio"] },
+    incluirColaboradorDaOrg(orgId, ["id", "nome_completo", "numero_colaborador", "iban", "banco", "organizacao_id", "unidade_negocio"]),
   ];
   // Filtro opcional por unidade de negocio (vazio = todas)
   var unidade = lerUnidadeNegocio(unidade_negocio);
-  if (unidade) include[0].where = { unidade_negocio: unidade };
+  if (unidade) include[0].where.unidade_negocio = unidade;
   try {
     var pagamentos = await Pagamento.findAll({
       where: where,
@@ -952,6 +982,9 @@ var previewDescontoFaltas = async function (req, res) {
       return res.status(400).json({ error: "colaborador_id, mes e ano sao obrigatorios" });
     }
     var apenasMes = req.query.apenas_mes === "true" || req.query.apenas_mes === "1";
+    if (!(await colaboradorNaOrg(colaborador_id, req.organizacao_id))) {
+      return res.status(404).json({ error: "Colaborador nao encontrado" });
+    }
     var detalhe = await calcularDescontoFaltas(colaborador_id, parseInt(mes), parseInt(ano), null, apenasMes);
     detalhe.desconto_faltas = detalhe.total;
     return res.status(200).json({ dados: detalhe });
@@ -966,6 +999,9 @@ var previewHorasExtras = async function (req, res) {
     var { colaborador_id, mes, ano } = req.query;
     if (!colaborador_id || !mes || !ano) {
       return res.status(400).json({ error: "colaborador_id, mes e ano sao obrigatorios" });
+    }
+    if (!(await colaboradorNaOrg(colaborador_id, req.organizacao_id))) {
+      return res.status(404).json({ error: "Colaborador nao encontrado" });
     }
     var contrato = await getSalarioContrato(colaborador_id);
     var salarioBase = contrato && contrato.salario_base ? parseFloat(contrato.salario_base) : 0;

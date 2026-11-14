@@ -132,6 +132,9 @@ var migrations = async function () {
     await adicionarColuna("utilizadores", "perfil_id", "CHAR(36) NULL");
     await adicionarColuna("utilizadores", "must_change_password", "BOOLEAN NOT NULL DEFAULT false");
     await adicionarColuna("utilizadores", "activo", "BOOLEAN NOT NULL DEFAULT true");
+    // Multi-organizacao: a conta de plataforma nao pertence a nenhuma org.
+    await adicionarColuna("utilizadores", "organizacao_id", "CHAR(36) NULL");
+    await adicionarColuna("utilizadores", "super_admin", "BOOLEAN NOT NULL DEFAULT false");
 
     // ==================== REGISTOS DE PRESENCA ====================
     await adicionarColuna("registos_presenca", "justificado", "BOOLEAN NOT NULL DEFAULT false");
@@ -303,6 +306,11 @@ var migrations = async function () {
     await adicionarColuna("seccoes", "telefone", "VARCHAR(20) NULL");
     await adicionarColuna("seccoes", "email", "VARCHAR(150) NULL");
     await adicionarColuna("seccoes", "localizacao", "VARCHAR(200) NULL");
+    // Sector e Secção sao o mesmo nivel; os registos antigos ficam "Secção".
+    await adicionarColuna("seccoes", "tipo", "VARCHAR(30) NULL DEFAULT 'Secção'");
+    await sequelize.query(
+      "UPDATE `seccoes` SET `tipo` = 'Secção' WHERE `tipo` IS NULL OR `tipo` = ''"
+    );
 
     // ==================== SECCOES_COLABORADORES ====================
     await alterarColuna("seccoes_colaboradores", "funcao", "VARCHAR(100) NULL DEFAULT NULL");
@@ -923,6 +931,52 @@ var migrations = async function () {
       }
     } catch (ePermDisc) {
       console.log(" Aviso: nao foi possivel conceder permissoes disciplinares:", ePermDisc.message);
+    }
+
+    // ==================== FORMACAO: cursos por organizacao ====================
+    // Os cursos passam a pertencer a uma organizacao (isolamento multi-org).
+    // Os cursos antigos herdam a org da primeira inscricao; se nao tiverem
+    // inscricoes e existir so uma organizacao, ficam nessa organizacao.
+    try {
+      await adicionarColuna("cursos_formacao", "organizacao_id", "CHAR(36) NULL");
+      await sequelize.query(
+        "UPDATE `cursos_formacao` c SET c.`organizacao_id` = (" +
+        "SELECT col.`organizacao_id` FROM `inscricoes_formacao` i " +
+        "INNER JOIN `colaboradores` col ON col.`id` = i.`colaborador_id` " +
+        "WHERE i.`curso_id` = c.`id` AND col.`organizacao_id` IS NOT NULL LIMIT 1" +
+        ") WHERE c.`organizacao_id` IS NULL"
+      );
+      await sequelize.query(
+        "UPDATE `cursos_formacao` SET `organizacao_id` = (" +
+        "SELECT `id` FROM `organizacoes` LIMIT 1" +
+        ") WHERE `organizacao_id` IS NULL AND (SELECT COUNT(*) FROM `organizacoes`) = 1"
+      );
+      console.log(" Cursos de formacao ligados a organizacao!");
+    } catch (eCursosOrg) {
+      console.log(" Aviso: nao foi possivel isolar os cursos de formacao:", eCursosOrg.message);
+    }
+
+    // ==================== AVALIACAO: ciclos por organizacao ====================
+    // Os ciclos passam a pertencer a uma organizacao (isolamento multi-org).
+    // Os ciclos antigos herdam a org das avaliacoes que ja tem; se nao tiverem
+    // nenhuma e existir so uma organizacao, ficam nessa organizacao.
+    try {
+      await adicionarColuna("ciclos_avaliacao", "organizacao_id", "CHAR(36) NULL");
+      await sequelize.query(
+        "UPDATE `ciclos_avaliacao` c SET c.`organizacao_id` = (" +
+        "SELECT col.`organizacao_id` FROM `avaliacoes_desempenho` a " +
+        "INNER JOIN `colaboradores` col ON col.`id` = a.`colaborador_id` " +
+        "WHERE a.`ciclo_id` = c.`id` AND col.`organizacao_id` IS NOT NULL LIMIT 1" +
+        ") WHERE c.`organizacao_id` IS NULL"
+      );
+      await sequelize.query(
+        "UPDATE `ciclos_avaliacao` SET `organizacao_id` = (" +
+        "SELECT `id` FROM `organizacoes` LIMIT 1" +
+        ") WHERE `organizacao_id` IS NULL AND (SELECT COUNT(*) FROM `organizacoes`) = 1"
+      );
+      console.log(" Ciclos de avaliacao ligados a organizacao!");
+    } catch (eCiclosOrg) {
+      console.log(" Aviso: nao foi possivel isolar os ciclos de avaliacao:", eCiclosOrg.message);
     }
 
     console.log(" Migracoes concluidas com sucesso!");

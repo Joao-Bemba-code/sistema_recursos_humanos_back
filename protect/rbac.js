@@ -107,6 +107,15 @@ var prepararUtilizador = function (utilizador) {
   return utilizador;
 };
 
+// Conta de plataforma: gere organizacoes mas nao pertence a nenhuma.
+// Nunca e concedida pela matriz de permissoes - so pelo campo super_admin.
+var requireSuperAdmin = function (req, res, next) {
+  if (!req.utilizador || !req.utilizador.super_admin) {
+    return res.status(403).json({ error: "Apenas o administrador da plataforma pode gerir organizações" });
+  }
+  return next();
+};
+
 var requireRole = function () {
   var roles = Array.prototype.slice.call(arguments);
   return function (req, res, next) {
@@ -262,6 +271,7 @@ var requireModuloOuRole = function (modulo, operacao) {
 
 module.exports = {
   MODULOS_SISTEMA,
+  requireSuperAdmin,
   requireRole,
   requireLevel,
   requirePermission,

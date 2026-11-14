@@ -1,10 +1,12 @@
 var { Contrato, Colaborador } = require("../models");
 var { Op } = require("sequelize");
+var { orgDaSessao, incluirColaboradorDaOrg, colaboradorNaOrg } = require("../helpers/organizacao");
 
 exports.listar = async (req, res, next) => {
   try {
     const { page = 1, limit = 15, search = "", tipo = "", estado = "" } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
+    const orgId = orgDaSessao(req);
 
     const where = {};
     if (search) {
@@ -18,7 +20,7 @@ exports.listar = async (req, res, next) => {
 
     const { count, rows } = await Contrato.findAndCountAll({
       where,
-      include: [{ model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] }],
+      include: [incluirColaboradorDaOrg(orgId)],
       order: [["data_inicio", "DESC"]],
       limit: parseInt(limit),
       offset,
@@ -42,8 +44,9 @@ exports.listar = async (req, res, next) => {
 
 exports.obter = async (req, res, next) => {
   try {
-    const c = await Contrato.findByPk(req.params.id, {
-      include: [{ model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] }],
+    const c = await Contrato.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req))],
     });
     if (!c) return res.status(404).json({ error: "Contrato não encontrado" });
     res.json({ dados: c });
@@ -68,6 +71,9 @@ exports.criar = async (req, res, next) => {
         dados[chaves[i]] = null;
       }
     }
+    if (!(await colaboradorNaOrg(dados.colaborador_id, orgDaSessao(req)))) {
+      return res.status(404).json({ error: "Colaborador não encontrado nesta organização" });
+    }
     const c = await Contrato.create(dados);
     res.status(201).json({ dados: c, message: "Contrato criado com sucesso" });
   } catch (e) {
@@ -77,8 +83,17 @@ exports.criar = async (req, res, next) => {
 
 exports.actualizar = async (req, res, next) => {
   try {
-    const c = await Contrato.findByPk(req.params.id);
+    const c = await Contrato.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req), ["id"])],
+    });
     if (!c) return res.status(404).json({ error: "Contrato não encontrado" });
+
+    if (req.body && req.body.colaborador_id !== undefined &&
+        String(req.body.colaborador_id) !== String(c.colaborador_id) &&
+        !(await colaboradorNaOrg(req.body.colaborador_id, orgDaSessao(req)))) {
+      return res.status(404).json({ error: "Colaborador não encontrado nesta organização" });
+    }
 
     var camposProtegidos = ["id", "createdAt", "updatedAt"];
     var dadosActualizar = {};
@@ -102,7 +117,10 @@ exports.actualizar = async (req, res, next) => {
 
 exports.eliminar = async (req, res, next) => {
   try {
-    const c = await Contrato.findByPk(req.params.id);
+    const c = await Contrato.findOne({
+      where: { id: req.params.id },
+      include: [incluirColaboradorDaOrg(orgDaSessao(req), ["id"])],
+    });
     if (!c) return res.status(404).json({ error: "Contrato não encontrado" });
     await c.destroy();
     res.json({ message: "Contrato eliminado com sucesso" });
@@ -113,13 +131,17 @@ exports.eliminar = async (req, res, next) => {
 
 exports.stats = async (req, res, next) => {
   try {
-    const total = await Contrato.count();
-    const activos = await Contrato.count({ where: { estado: "Activo" } });
-    const expirados = await Contrato.count({ where: { estado: "Expirado" } });
-    const rescindidos = await Contrato.count({ where: { estado: "Rescindido" } });
+    // Isolamento: so contam os contratos de colaboradores da organizacao.
+    const comOrg = () => [incluirColaboradorDaOrg(orgDaSessao(req), ["id"])];
+
+    const total = await Contrato.count({ include: comOrg() });
+    const activos = await Contrato.count({ where: { estado: "Activo" }, include: comOrg() });
+    const expirados = await Contrato.count({ where: { estado: "Expirado" }, include: comOrg() });
+    const rescindidos = await Contrato.count({ where: { estado: "Rescindido" }, include: comOrg() });
 
     const por_tipo = await Contrato.findAll({
-      attributes: ["tipo", [require("sequelize").fn("COUNT", "id"), "total"]],
+      attributes: ["tipo", [require("sequelize").fn("COUNT", "Contrato.id"), "total"]],
+      include: comOrg(),
       group: ["tipo"],
     });
 

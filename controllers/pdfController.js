@@ -5,6 +5,7 @@ var os = require("os");
 var { Op } = require("sequelize");
 var { Vencimento, Pagamento, Colaborador, Contrato, Organizacao, ConvocatoriaDisciplinar, MedidaDisciplinar } = require("../models");
 var { listarPagamentosParaResumo } = require("./folhaSalarialController");
+var { incluirColaboradorDaOrg, ORG_INEXISTENTE } = require("../helpers/organizacao");
 var { listarChecklist } = require("./documentoController");
 
 var MESES = ["Janeiro","Fevereiro","Marco","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -43,7 +44,6 @@ var { lerBufferDeUrl } = require("../helpers/ficheiros");
 // Devolve o logo como Buffer (Cloudinary/remoto, /api/ficheiros/...) ou como
 // caminho local (fallback uploads/). Null quando nao ha logo disponivel.
 async function getLogoSrc(org) {
-  var def = path.join(__dirname, "..", "uploads", "logos", "logo_default.jpg");
   try {
     if (org && org.logo_url) {
       var url = String(org.logo_url).split("?")[0];
@@ -57,7 +57,8 @@ async function getLogoSrc(org) {
   } catch (e) {
     // logo error silently ignored
   }
-  if (fs.existsSync(def)) return def;
+  // Sem logo proprio nao se usa nenhum logotipo por omissao: cada
+  // organizacao mostra apenas o seu nome nos documentos.
   return null;
 }
 
@@ -211,8 +212,15 @@ function replacePlaceholders(template, vars) {
 exports.folhaSalarial = async function (req, res) {
   try {
     var { id } = req.params;
-    var pagamento = await Pagamento.findByPk(id, {
-      include: [{ model: Colaborador, as: "colaborador" }],
+    var pagamento = await Pagamento.findOne({
+      where: { id: id },
+      include: [
+        incluirColaboradorDaOrg(req.organizacao_id, [
+          "id", "nome_completo", "numero_colaborador", "nif", "numero_seguranca_social",
+          "conta_bancaria", "iban", "banco", "bi", "estado_civil", "endereco",
+          "organizacao_id", "unidade_negocio",
+        ]),
+      ],
     });
     if (!pagamento) {
       return res.status(404).json({ error: "Pagamento nao encontrado" });
@@ -361,8 +369,15 @@ exports.folhaSalarial = async function (req, res) {
 exports.contrato = async function (req, res) {
   try {
     var { id } = req.params;
-    var contrato = await Contrato.findByPk(id, {
-      include: [{ model: Colaborador, as: "colaborador" }],
+    var contrato = await Contrato.findOne({
+      where: { id: id },
+      include: [
+        incluirColaboradorDaOrg(req.organizacao_id, [
+          "id", "nome_completo", "numero_colaborador", "nif", "bi", "estado_civil",
+          "cidade", "provincia", "endereco", "email_institucional", "email_pessoal",
+          "telefone", "organizacao_id",
+        ]),
+      ],
     });
     if (!contrato) {
       return res.status(404).json({ error: "Contrato nao encontrado" });
@@ -803,7 +818,8 @@ exports.avisoAdvertencia = async function (req, res) {
 
     var colab = null;
     if (colaboradorId && colaboradorId !== "null" && colaboradorId !== "undefined") {
-      colab = await Colaborador.findByPk(colaboradorId, {
+      colab = await Colaborador.findOne({
+        where: { id: colaboradorId, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
         include: [{ model: Organizacao, as: "organizacao" }],
       });
     }
@@ -839,7 +855,9 @@ exports.avisoAdvertencia = async function (req, res) {
 exports.fichaColaborador = async function (req, res) {
   try {
     var { id } = req.params;
-    var colab = await Colaborador.findByPk(id);
+    var colab = await Colaborador.findOne({
+      where: { id: id, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
+    });
     if (!colab) {
       return res.status(404).json({ error: "Colaborador nao encontrado" });
     }
@@ -1051,7 +1069,7 @@ exports.resumoPagamentos = async function (req, res) {
     }
     var mostrarUnidade = unidade && unidade !== "Todas";
 
-    var pagamentos = await listarPagamentosParaResumo(parseInt(mes), parseInt(ano), unidade);
+    var pagamentos = await listarPagamentosParaResumo(parseInt(mes), parseInt(ano), unidade, req.organizacao_id);
     if (pagamentos.length === 0) {
       return res.status(404).json({ error: "Nenhum pagamento encontrado para o periodo indicado" + (mostrarUnidade ? " na unidade " + unidade : "") });
     }
@@ -1339,7 +1357,7 @@ exports.convocatoriaDisciplinar = async function (req, res) {
       include: [{ model: Colaborador, as: "colaborador", required: false }],
     });
     if (!conv) return res.status(404).json({ error: "Convocatória não encontrada" });
-    if (req.organizacao_id && conv.organizacao_id && String(conv.organizacao_id) !== String(req.organizacao_id)) {
+    if (!req.organizacao_id || !conv.organizacao_id || String(conv.organizacao_id) !== String(req.organizacao_id)) {
       return res.status(404).json({ error: "Convocatória não encontrada" });
     }
 
@@ -1428,8 +1446,7 @@ exports.convocatoriaDisciplinar = async function (req, res) {
 
 exports.relatorioMedidasDisciplinares = async function (req, res) {
   try {
-    var where = {};
-    if (req.organizacao_id) where.organizacao_id = req.organizacao_id;
+    var where = { organizacao_id: req.organizacao_id || ORG_INEXISTENTE };
     if (req.query.situacao) where.situacao = String(req.query.situacao).slice(0, 30);
     if (req.query.medida) where.medida = String(req.query.medida).slice(0, 60);
     if (req.query.colaborador_id) where.colaborador_id = String(req.query.colaborador_id).slice(0, 36);

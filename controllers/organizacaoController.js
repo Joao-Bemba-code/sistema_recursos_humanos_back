@@ -1,9 +1,29 @@
 var { Op } = require("sequelize");
 var { Organizacao } = require("../models");
 
+// So o super-admin da plataforma ve/edita varias organizacoes. Qualquer outra
+// conta fica limitada a organizacao a que pertence (isolamento multi-org).
+var eSuperAdmin = function (req) {
+  return !!(req.utilizador && req.utilizador.super_admin);
+};
+
+var orgDaSessao = function (req) {
+  return req.utilizador ? req.utilizador.organizacao_id : null;
+};
+
+var podeVer = function (req, organizacao) {
+  if (eSuperAdmin(req)) return true;
+  return !!organizacao && String(organizacao.id) === String(orgDaSessao(req));
+};
+
 var list = async function (req, res) {
   try {
     var where = {};
+    if (!eSuperAdmin(req)) {
+      // Sem organizacao nao ha nada para listar (fail-closed).
+      if (!orgDaSessao(req)) return res.status(200).json({ dados: [] });
+      where.id = orgDaSessao(req);
+    }
     if (req.query.search) {
       where[Op.or] = [
         { nome: { [Op.like]: "%" + req.query.search + "%" } },
@@ -25,7 +45,7 @@ var list = async function (req, res) {
 var getById = async function (req, res) {
   try {
     var organizacao = await Organizacao.findByPk(req.params.id);
-    if (!organizacao) {
+    if (!organizacao || !podeVer(req, organizacao)) {
       return res.status(404).json({ error: "Organização não encontrada" });
     }
     return res.status(200).json({ dados: organizacao });
@@ -80,11 +100,13 @@ var create = async function (req, res) {
 var update = async function (req, res) {
   try {
     var organizacao = await Organizacao.findByPk(req.params.id);
-    if (!organizacao) {
+    if (!organizacao || !podeVer(req, organizacao)) {
       return res.status(404).json({ error: "Organização não encontrada" });
     }
 
-    var camposPermitidos = ["nome", "nome_curto", "nif", "email", "telefone", "endereco", "cidade", "provincia", "pais", "logo", "website", "dominio", "activo", "template_contrato", "logo_url"];
+    var camposPermitidos = ["nome", "nome_curto", "nif", "email", "telefone", "endereco", "cidade", "provincia", "pais", "logo", "website", "dominio", "template_contrato", "logo_url"];
+    // Activar/desactivar e um acto da plataforma, nao do admin da organizacao.
+    if (eSuperAdmin(req)) camposPermitidos.push("activo");
     var dadosActualizar = {};
 
     for (var i = 0; i < camposPermitidos.length; i++) {
@@ -117,7 +139,7 @@ var update = async function (req, res) {
 var remove = async function (req, res) {
   try {
     var organizacao = await Organizacao.findByPk(req.params.id);
-    if (!organizacao) {
+    if (!organizacao || !podeVer(req, organizacao)) {
       return res.status(404).json({ error: "Organização não encontrada" });
     }
 

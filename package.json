@@ -6,7 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node index.js",
-    "migrate": "node migrations.js"
+    "migrate": "node migrations.js",
+    "super-admin": "node scripts/criar-super-admin.js"
   },
   "keywords": [],
   "author": "",

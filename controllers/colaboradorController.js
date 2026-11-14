@@ -2,6 +2,7 @@ var { Op } = require("sequelize");
 var { Colaborador, Departamento, Cargo, Utilizador, Contrato, Ferias, SolicitacaoFerias, Licenca, RegistoPresenca, AvaliacaoDesempenho, InscricaoFormacao, OcorrenciaDisciplinar, Vencimento, Pagamento, PedidoColaborador } = require("../models");
 var documentoController = require("./documentoController");
 var { temPermissao } = require("../protect/rbac");
+var { ORG_INEXISTENTE } = require("../helpers/organizacao");
 
 // Unidades de negocio fixas da grafica (mesma lista do ENUM do modelo
 // Colaborador e de UNIDADES_NEGOCIO_VALIDAS na folha salarial)
@@ -23,9 +24,8 @@ var list = async function (req, res) {
     var unidade_negocio = req.query.unidade_negocio;
 
     var where = {};
-    if (req.organizacao_id) {
-      where.organizacao_id = req.organizacao_id;
-    }
+    // Sem organizacao na sessao nao devolve colaboradores de ninguem.
+    where.organizacao_id = req.organizacao_id || ORG_INEXISTENTE;
 
     if (search) {
       where[Op.or] = [
@@ -78,7 +78,8 @@ var list = async function (req, res) {
 
 var getById = async function (req, res) {
   try {
-    var colaborador = await Colaborador.findByPk(req.params.id, {
+    var colaborador = await Colaborador.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
       include: [
         { model: Departamento, as: "departamento" },
         { model: Cargo, as: "cargo" },
@@ -113,6 +114,9 @@ var generateNumero = async function (organizacao_id) {
 
 var create = async function (req, res) {
   try {
+    if (!req.organizacao_id) {
+      return res.status(403).json({ error: "Conta sem organizacao associada" });
+    }
     var dados = req.body;
     dados.organizacao_id = req.organizacao_id;
 
@@ -195,7 +199,9 @@ var create = async function (req, res) {
 
 var update = async function (req, res) {
   try {
-    var colaborador = await Colaborador.findByPk(req.params.id);
+    var colaborador = await Colaborador.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
+    });
     if (!colaborador) {
       return res.status(404).json({ error: "Colaborador não encontrado" });
     }
@@ -292,7 +298,9 @@ var update = async function (req, res) {
 
 var updateStatus = async function (req, res) {
   try {
-    var colaborador = await Colaborador.findByPk(req.params.id);
+    var colaborador = await Colaborador.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
+    });
     if (!colaborador) {
       return res.status(404).json({ error: "Colaborador não encontrado" });
     }
@@ -324,7 +332,9 @@ var updateStatus = async function (req, res) {
 
 var remove = async function (req, res) {
   try {
-    var colaborador = await Colaborador.findByPk(req.params.id);
+    var colaborador = await Colaborador.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
+    });
     if (!colaborador) {
       return res.status(404).json({ error: "Colaborador não encontrado" });
     }
@@ -356,12 +366,8 @@ var remove = async function (req, res) {
 
 var stats = async function (req, res) {
   try {
-    var orgFilter = "";
-    var params = [];
-    if (req.organizacao_id) {
-      orgFilter = " AND organizacao_id = ?";
-      params.push(req.organizacao_id);
-    }
+    var orgFilter = " AND organizacao_id = ?";
+    var params = [req.organizacao_id || ORG_INEXISTENTE];
 
     var sql = "SELECT " +
       "COUNT(*) AS total, " +

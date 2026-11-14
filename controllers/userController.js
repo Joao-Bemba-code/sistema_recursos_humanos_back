@@ -10,6 +10,18 @@ var montarPerfis = function (utilizador) {
   return lista;
 };
 
+var ORG_INEXISTENTE = "00000000-0000-0000-0000-000000000000";
+
+// Super-admin da plataforma pode gerir qualquer conta; os restantes so contas
+// da propria organizacao. Sem organizacao na sessao nao encontra nada.
+var escopoUtilizador = function (req, id) {
+  var where = { id: id };
+  if (!(req.utilizador && req.utilizador.super_admin)) {
+    where.organizacao_id = req.organizacao_id || ORG_INEXISTENTE;
+  }
+  return where;
+};
+
 var list = async function (req, res) {
   try {
     var page = parseInt(req.query.page) || 1;
@@ -20,9 +32,9 @@ var list = async function (req, res) {
     var perfil_id = req.query.perfil_id;
 
     var where = {};
-    if (req.organizacao_id) {
-      where.organizacao_id = req.organizacao_id;
-    }
+    // Sem organizacao na sessao (ex.: conta da plataforma) nao lista contas
+    // de nenhuma organizacao: o painel da plataforma so mostra agregados.
+    where.organizacao_id = req.organizacao_id || ORG_INEXISTENTE;
 
     if (search) {
       where[Op.or] = [
@@ -78,10 +90,10 @@ var list = async function (req, res) {
 
     // Colaboradores ainda sem conta de acesso
     var semConta = await Colaborador.findAll({
-      where: Object.assign(
-        { utilizador_id: null },
-        req.organizacao_id ? { organizacao_id: req.organizacao_id } : {}
-      ),
+      where: {
+        utilizador_id: null,
+        organizacao_id: req.organizacao_id || ORG_INEXISTENTE,
+      },
       attributes: ["id", "numero_colaborador", "nome_completo", "email_institucional", "email_pessoal", "telefone"],
       order: [["nome_completo", "ASC"]],
     });
@@ -151,7 +163,8 @@ var getById = async function (req, res) {
   try {
     var { id } = req.params;
 
-    var utilizador = await Utilizador.findByPk(id, {
+    var utilizador = await Utilizador.findOne({
+      where: escopoUtilizador(req, id),
       include: [
         { model: Perfil, as: "perfil" },
         { model: Perfil, as: "perfis_extra" },
@@ -219,7 +232,11 @@ var create = async function (req, res) {
     }
 
     if (colaborador_id) {
-      await Colaborador.update({ utilizador_id: novoUtilizador.id }, { where: { id: colaborador_id } });
+      var whereColab = { id: colaborador_id };
+      if (!(req.utilizador && req.utilizador.super_admin)) {
+        whereColab.organizacao_id = req.organizacao_id || ORG_INEXISTENTE;
+      }
+      await Colaborador.update({ utilizador_id: novoUtilizador.id }, { where: whereColab });
     }
 
     var completo = await Utilizador.findByPk(novoUtilizador.id, {
@@ -246,7 +263,7 @@ var bloqueio = async function (req, res) {
     var pedido = req.body || {};
     var bloquear = pedido.bloqueado === true || pedido.bloqueado === "true" || pedido.bloqueado === 1;
 
-    var utilizador = await Utilizador.findByPk(id);
+    var utilizador = await Utilizador.findOne({ where: escopoUtilizador(req, id) });
     if (!utilizador) {
       return res.status(404).json({ error: "Utilizador não encontrado" });
     }
@@ -277,7 +294,7 @@ var bloqueio = async function (req, res) {
 var update = async function (req, res) {
   try {
     var { id } = req.params;
-    var utilizador = await Utilizador.findByPk(id);
+    var utilizador = await Utilizador.findOne({ where: escopoUtilizador(req, id) });
 
     if (!utilizador) {
       return res.status(404).json({ error: "Utilizador não encontrado" });
@@ -348,7 +365,7 @@ var update = async function (req, res) {
 var remove = async function (req, res) {
   try {
     var { id } = req.params;
-    var utilizador = await Utilizador.findByPk(id);
+    var utilizador = await Utilizador.findOne({ where: escopoUtilizador(req, id) });
 
     if (!utilizador) {
       return res.status(404).json({ error: "Utilizador não encontrado" });
@@ -379,7 +396,7 @@ var changePassword = async function (req, res) {
       return res.status(400).json({ error: "A nova senha deve ter pelo menos 6 caracteres" });
     }
 
-    var utilizador = await Utilizador.findByPk(id);
+    var utilizador = await Utilizador.findOne({ where: escopoUtilizador(req, id) });
     if (!utilizador) {
       return res.status(404).json({ error: "Utilizador nao encontrado" });
     }
@@ -406,7 +423,7 @@ var changeEmail = async function (req, res) {
       return res.status(400).json({ error: "Novo email e senha sao obrigatorios" });
     }
 
-    var utilizador = await Utilizador.findByPk(id);
+    var utilizador = await Utilizador.findOne({ where: escopoUtilizador(req, id) });
     if (!utilizador) {
       return res.status(404).json({ error: "Utilizador nao encontrado" });
     }

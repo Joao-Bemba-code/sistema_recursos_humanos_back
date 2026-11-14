@@ -7,6 +7,11 @@ var CursoFormacao = sequelize.define("CursoFormacao", {
     defaultValue: DataTypes.UUIDV4,
     primaryKey: true,
   },
+  organizacao_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+    comment: "Organizacao dona do curso (isolamento entre organizacoes)",
+  },
   nome: {
     type: DataTypes.STRING(200),
     allowNull: false,

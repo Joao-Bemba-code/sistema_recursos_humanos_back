@@ -62,6 +62,9 @@ var serializarUtilizador = async function (utilizador) {
   }
   json.perfis = perfisJson;
   json.multiPerfil = perfisJson.length > 1;
+  // Conta de plataforma (sem organizacao) - o frontend decide o painel por aqui.
+  json.super_admin = !!utilizador.super_admin;
+  json.organizacao_id = utilizador.organizacao_id || null;
 
   // O frontend usa utilizador.colaborador para filtrar as tarefas proprias.
   var colaborador = await Colaborador.findOne({
@@ -155,6 +158,10 @@ var login = async function (req, res) {
       return res.status(403).json({ error: "Conta bloqueada. Contacte o administrador." });
     }
 
+    if (utilizador.organizacao && utilizador.organizacao.activo === false) {
+      return res.status(403).json({ error: "Organização desactivada. Contacte o suporte." });
+    }
+
     var passwordValida = await utilizador.verificarPassword(password);
     if (!passwordValida) {
       var tentativas = (utilizador.tentativas_login || 0) + 1;
@@ -168,6 +175,15 @@ var login = async function (req, res) {
         ? " Conta bloqueada por segurança."
         : " Tentativa " + tentativas + " de 5.";
       return res.status(401).json({ error: "Credenciais inválidas." + msgExtra });
+    }
+
+    // A conta da plataforma tem um acesso proprio e nao entra pelo login das
+    // organizacoes (nem o login das organizacoes aceita esta conta).
+    if (utilizador.super_admin) {
+      return res.status(403).json({
+        error: "Conta da plataforma. Use o acesso da plataforma em /plataforma/login.",
+        acesso_plataforma: true,
+      });
     }
 
     await utilizador.update({ ultimo_login: new Date(), tentativas_login: 0, bloqueado: false });
@@ -209,14 +225,17 @@ var register = async function (req, res) {
       return res.status(409).json({ error: "Username já está em uso" });
     }
 
-    var orgId = organizacao_id || req.organizacao_id;
+    // Isolamento: quem tem organizacao so cria contas na propria. So o
+    // super-admin da plataforma pode escolher a organizacao de destino.
+    var souSuperAdmin = !!(req.utilizador && req.utilizador.super_admin);
+    var orgId = souSuperAdmin ? (organizacao_id || null) : (req.utilizador && req.utilizador.organizacao_id);
 
     if (!orgId) {
-      var org = await Organizacao.findOne();
-      if (!org) {
-        return res.status(400).json({ error: "Nenhuma organização encontrada. Crie uma primeiro." });
-      }
-      orgId = org.id;
+      return res.status(400).json({ error: "Indique a organização do novo utilizador" });
+    }
+    var orgDestino = await Organizacao.findByPk(orgId);
+    if (!orgDestino || orgDestino.activo === false) {
+      return res.status(404).json({ error: "Organização não encontrada ou desactivada" });
     }
 
     var perfil = null;
@@ -298,4 +317,69 @@ var changePassword = async function (req, res) {
   }
 };
 
-module.exports = { login, register, getProfile, changePassword, generateToken };
+// Login exclusivo do painel da plataforma. Nao cria contas, nao revela se um
+// email pertence a uma organizacao e recusa tudo o que nao seja super-admin.
+var loginPlataforma = async function (req, res) {
+  try {
+    var { email, username, password } = req.body || {};
+
+    if (!email && !username) {
+      return res.status(400).json({ error: "Email ou username é obrigatório" });
+    }
+    if (!password) {
+      return res.status(400).json({ error: "Password é obrigatória" });
+    }
+
+    var where = email
+      ? { email: String(email).toLowerCase() }
+      : { username: String(username).toLowerCase() };
+
+    var utilizador = await Utilizador.findOne({
+      where: where,
+      include: [
+        { model: Perfil, as: "perfil" },
+        { model: Perfil, as: "perfis_extra" },
+        { model: Organizacao, as: "organizacao" },
+      ],
+    });
+
+    if (!utilizador || !utilizador.super_admin) {
+      return res.status(401).json({ error: "Credenciais inválidas" });
+    }
+
+    if (!utilizador.activo) {
+      return res.status(403).json({ error: "Conta desactivada. Contacte o suporte." });
+    }
+
+    if (utilizador.bloqueado) {
+      return res.status(403).json({ error: "Conta bloqueada. Contacte o suporte." });
+    }
+
+    var passwordValida = await utilizador.verificarPassword(password);
+    if (!passwordValida) {
+      var tentativas = (utilizador.tentativas_login || 0) + 1;
+      var updateData = { tentativas_login: tentativas };
+      if (tentativas >= 5) updateData.bloqueado = true;
+      await utilizador.update(updateData);
+
+      var msgExtra = tentativas >= 5
+        ? " Conta bloqueada por segurança."
+        : " Tentativa " + tentativas + " de 5.";
+      return res.status(401).json({ error: "Credenciais inválidas." + msgExtra });
+    }
+
+    await utilizador.update({ ultimo_login: new Date(), tentativas_login: 0, bloqueado: false });
+
+    return res.status(200).json({
+      mensagem: "Sessão da plataforma iniciada",
+      token: generateToken(utilizador),
+      refreshToken: generateRefreshToken(utilizador),
+      utilizador: await serializarUtilizador(utilizador),
+    });
+  } catch (e) {
+    console.log("Erro no login da plataforma:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+module.exports = { login, loginPlataforma, register, getProfile, changePassword, generateToken };

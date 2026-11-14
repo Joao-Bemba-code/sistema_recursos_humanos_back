@@ -31,6 +31,18 @@ var Utilizador = sequelize.define("Utilizador", {
     type: DataTypes.STRING(20),
     allowNull: true,
   },
+  // Organizacao a que a conta pertence. Fica nula apenas para o super-admin
+  // da plataforma (dono do sistema, sem dados de nenhuma organizacao).
+  organizacao_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
+  // Conta de plataforma: pode criar e gerir organizacoes, mas nao pertence a
+  // nenhuma delas. Nunca deve ser atribuida a utilizadores normais.
+  super_admin: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
   fotografia: {
     type: DataTypes.STRING(500),
     allowNull: true,

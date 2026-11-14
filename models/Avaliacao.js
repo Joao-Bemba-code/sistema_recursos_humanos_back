@@ -7,6 +7,10 @@ var CicloAvaliacao = sequelize.define("CicloAvaliacao", {
     defaultValue: DataTypes.UUIDV4,
     primaryKey: true,
   },
+  organizacao_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
   nome: {
     type: DataTypes.STRING(150),
     allowNull: false,

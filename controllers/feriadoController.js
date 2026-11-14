@@ -1,5 +1,6 @@
 var { Op } = require("sequelize");
 var { Feriado, RegistoPresenca } = require("../models");
+var { ORG_INEXISTENTE } = require("../helpers/organizacao");
 
 // Lista os feriados (filtro opcional ?ano=2026), ordenados por data.
 // Mostra os feriados globais (organizacao_id nulo, os pre-carregados) e os da
@@ -7,9 +8,7 @@ var { Feriado, RegistoPresenca } = require("../models");
 var list = async function (req, res) {
   try {
     var where = {};
-    if (req.organizacao_id) {
-      where.organizacao_id = { [Op.or]: [req.organizacao_id, null] };
-    }
+    where.organizacao_id = { [Op.or]: [req.organizacao_id || ORG_INEXISTENTE, null] };
     if (req.query.ano) {
       var ano = String(req.query.ano).slice(0, 4);
       where.data = { [Op.gte]: ano + "-01-01", [Op.lte]: ano + "-12-31" };
@@ -34,6 +33,9 @@ var list = async function (req, res) {
 // faltas falsas na folha. Registo manual do RH nunca e tocado.
 var create = async function (req, res) {
   try {
+    if (!req.organizacao_id) {
+      return res.status(403).json({ error: "A sua conta nao esta associada a uma organizacao" });
+    }
     var data = String(req.body.data || "").slice(0, 10);
     var dataFim = req.body.data_fim ? String(req.body.data_fim).slice(0, 10) : "";
     var descricao = req.body.descricao ? String(req.body.descricao).slice(0, 200) : null;
@@ -79,7 +81,7 @@ var create = async function (req, res) {
       criados.push(await Feriado.create({
         data: datas[i],
         descricao: descricao,
-        organizacao_id: req.organizacao_id || null,
+        organizacao_id: req.organizacao_id,
       }));
     }
 
@@ -116,7 +118,12 @@ var create = async function (req, res) {
 
 var remove = async function (req, res) {
   try {
-    var feriado = await Feriado.findByPk(req.params.id);
+    var feriado = await Feriado.findOne({
+      where: {
+        id: req.params.id,
+        organizacao_id: req.organizacao_id || ORG_INEXISTENTE,
+      },
+    });
     if (!feriado) {
       return res.status(404).json({ error: "Feriado não encontrado" });
     }

@@ -1,12 +1,13 @@
 var { Departamento, Cargo } = require("../models");
 var { Op } = require("sequelize");
+var { ORG_INEXISTENTE } = require("../helpers/organizacao");
 
 exports.listar = async (req, res, next) => {
   try {
     const { page = 1, limit = 15, search = "", tipo = "" } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    const where = {};
+    const where = { organizacao_id: req.organizacao_id || ORG_INEXISTENTE };
     if (search) {
       where[Op.or] = [
         { nome: { [Op.like]: `%${search}%` } },
@@ -41,7 +42,9 @@ exports.listar = async (req, res, next) => {
 
 exports.obter = async (req, res, next) => {
   try {
-    const dept = await Departamento.findByPk(req.params.id);
+    const dept = await Departamento.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
+    });
     if (!dept) return res.status(404).json({ error: "Departamento não encontrado" });
     res.json({ dados: dept });
   } catch (e) {
@@ -52,9 +55,10 @@ exports.obter = async (req, res, next) => {
 exports.criar = async (req, res, next) => {
   try {
     var dados = req.body;
-    if (req.organizacao_id) {
-      dados.organizacao_id = req.organizacao_id;
+    if (!req.organizacao_id) {
+      return res.status(403).json({ error: "Conta sem organizacao associada" });
     }
+    dados.organizacao_id = req.organizacao_id;
     const dept = await Departamento.create(dados);
     res.status(201).json({ dados: dept, message: "Departamento criado com sucesso" });
   } catch (e) {
@@ -64,9 +68,14 @@ exports.criar = async (req, res, next) => {
 
 exports.actualizar = async (req, res, next) => {
   try {
-    const dept = await Departamento.findByPk(req.params.id);
+    const dept = await Departamento.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
+    });
     if (!dept) return res.status(404).json({ error: "Departamento não encontrado" });
-    await dept.update(req.body);
+    const dados = Object.assign({}, req.body);
+    delete dados.id;
+    delete dados.organizacao_id;
+    await dept.update(dados);
     res.json({ dados: dept, message: "Departamento actualizado com sucesso" });
   } catch (e) {
     next(e);
@@ -75,7 +84,9 @@ exports.actualizar = async (req, res, next) => {
 
 exports.eliminar = async (req, res, next) => {
   try {
-    const dept = await Departamento.findByPk(req.params.id);
+    const dept = await Departamento.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
+    });
     if (!dept) return res.status(404).json({ error: "Departamento não encontrado" });
     await dept.destroy();
     res.json({ message: "Departamento eliminado com sucesso" });

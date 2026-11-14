@@ -1,5 +1,6 @@
 var { Op, fn, col } = require("sequelize");
 var { PicagemBiometrico, Colaborador, RegistoPresenca, Feriado, EscalaSemanal } = require("../models");
+var { ORG_INEXISTENTE, incluirColaboradorDaOrg } = require("../helpers/organizacao");
 
 // Horario de trabalho por omissao (configuravel por env): entrada 08:00, saida
 // 16:00. Serve de FALLBACK para colaboradores sem escala semanal propria (ver
@@ -977,7 +978,7 @@ var mapeamento = async function (req, res) {
   try {
     var todos = req.query.todos === "1" || req.query.todos === "true";
     var where = todos ? {} : { id_biometrico: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] } };
-    if (req.organizacao_id) where.organizacao_id = req.organizacao_id;
+    where.organizacao_id = req.organizacao_id || ORG_INEXISTENTE;
 
     var colaboradores = await Colaborador.findAll({
       where: where,
@@ -1005,7 +1006,8 @@ var picagens = async function (req, res) {
 
     var { count, rows } = await PicagemBiometrico.findAndCountAll({
       where: where,
-      include: [{ model: Colaborador, as: "colaborador", attributes: ["id", "nome_completo", "numero_colaborador"] }],
+      include: [incluirColaboradorDaOrg(req.organizacao_id, ["id", "nome_completo", "numero_colaborador"])],
+      distinct: true,
       order: [["data_hora", "DESC"]],
       limit: limit,
       offset: offset,
