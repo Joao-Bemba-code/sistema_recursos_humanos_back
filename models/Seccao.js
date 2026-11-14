@@ -19,6 +19,13 @@ var Seccao = sequelize.define("Seccao", {
     type: DataTypes.STRING(150),
     allowNull: false,
   },
+  // Sector e Secção sao o mesmo nivel dentro do departamento; distinguem-se
+  // apenas por este campo.
+  tipo: {
+    type: DataTypes.STRING(30),
+    allowNull: true,
+    defaultValue: "Secção",
+  },
   codigo: {
     type: DataTypes.STRING(20),
     allowNull: true,
