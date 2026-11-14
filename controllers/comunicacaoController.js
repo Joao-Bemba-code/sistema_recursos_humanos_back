@@ -1,5 +1,5 @@
 var { Op } = require("sequelize");
-var { Aviso, ComunicacaoAnexo, Utilizador, Colaborador, Departamento, Cargo } = require("../models");
+var { Aviso, ComunicacaoAnexo, Utilizador, Colaborador, Departamento, Cargo, Unidade } = require("../models");
 var { perfisUtilizador, fundirPermissoes } = require("../protect/rbac");
 
 // Limites dos anexos (guardados na BD em base64): ate 8 ficheiros, cada um
@@ -29,6 +29,7 @@ var incluirAnexos = [
   { model: Departamento, as: "departamento", attributes: ["id", "nome"] },
   { model: Cargo, as: "cargo", attributes: ["id", "nome"] },
   { model: Colaborador, as: "colaborador_destino", attributes: ["id", "nome_completo", "nome_curto"] },
+  { model: Unidade, as: "unidade", attributes: ["id", "nome"], required: false },
   { model: ComunicacaoAnexo, as: "anexos", attributes: ["id", "nome", "tipo", "tamanho", "createdAt"] },
 ];
 
@@ -38,6 +39,7 @@ var limparDestinatarios = function (dados, visivelPara) {
   if (visivelPara !== "Departamento") dados.departamento_id = null;
   if (visivelPara !== "Cargo") dados.cargo_id = null;
   if (visivelPara !== "Perfil") dados.colaborador_id = null;
+  if (visivelPara !== "Unidade") dados.unidade_id = null;
   return dados;
 };
 
@@ -51,6 +53,9 @@ var validarDestino = function (visivelPara, dados) {
   }
   if (visivelPara === "Perfil" && !dados.colaborador_id) {
     return "Indique o colaborador de destino";
+  }
+  if (visivelPara === "Unidade" && !dados.unidade_id) {
+    return "Indique a unidade de destino";
   }
   return null;
 };
@@ -94,10 +99,11 @@ var destinatarios = async function (req, res) {
 
     var colaboradores = await Colaborador.findAll({
       where: { organizacao_id: orgId, estado: "Activo" },
-      attributes: ["id", "nome_completo", "nome_curto", "cargo_id", "departamento_id"],
+      attributes: ["id", "nome_completo", "nome_curto", "cargo_id", "departamento_id", "unidade_id"],
       include: [
         { model: Cargo, as: "cargo", attributes: ["id", "nome"] },
         { model: Departamento, as: "departamento", attributes: ["id", "nome"] },
+        { model: Unidade, as: "unidade", attributes: ["id", "nome"], required: false },
       ],
       order: [["nome_completo", "ASC"]],
     });
@@ -123,6 +129,12 @@ var destinatarios = async function (req, res) {
       order: [["nome", "ASC"]],
     });
 
+    var unidades = await Unidade.findAll({
+      where: { organizacao_id: orgId },
+      attributes: ["id", "nome", "codigo"],
+      order: [["nome", "ASC"]],
+    });
+
     return res.status(200).json({
       colaboradores: colaboradores.map(function (c) {
         return {
@@ -130,6 +142,8 @@ var destinatarios = async function (req, res) {
           nome: c.nome_completo || c.nome_curto || "",
           cargo: c.cargo ? c.cargo.nome : "",
           departamento: c.departamento ? c.departamento.nome : "",
+          unidade: c.unidade ? c.unidade.nome : "",
+          unidade_id: c.unidade_id || null,
         };
       }),
       cargos: cargos.map(function (cg) {
@@ -142,6 +156,7 @@ var destinatarios = async function (req, res) {
         return { id: cg.id, nome: cg.nome, departamentos: nomes };
       }),
       departamentos: departamentos,
+      unidades: unidades,
     });
   } catch (e) {
     console.log("Erro ao listar destinatarios:", e.message);
@@ -185,7 +200,7 @@ var list = async function (req, res) {
       });
       var alternativas = [
         { visivel_para: "Todos" },
-        { visivel_para: { [Op.in]: ["Departamento", "Cargo", "Perfil"] }, departamento_id: null, cargo_id: null, colaborador_id: null },
+        { visivel_para: { [Op.in]: ["Departamento", "Cargo", "Perfil", "Unidade"] }, departamento_id: null, cargo_id: null, colaborador_id: null, unidade_id: null },
       ];
       if (meuColab) {
         if (meuColab.departamento_id) {
@@ -193,6 +208,9 @@ var list = async function (req, res) {
         }
         if (meuColab.cargo_id) {
           alternativas.push({ visivel_para: "Cargo", cargo_id: meuColab.cargo_id });
+        }
+        if (meuColab.unidade_id) {
+          alternativas.push({ visivel_para: "Unidade", unidade_id: meuColab.unidade_id });
         }
         alternativas.push({ visivel_para: "Perfil", colaborador_id: meuColab.id });
       }
@@ -215,6 +233,11 @@ var list = async function (req, res) {
 
     if (tipo) {
       where.tipo = tipo;
+    }
+
+    // Filtro por unidade (gestores): ver comunicados dirigidos a uma unidade.
+    if (gestor && req.query.unidade_id) {
+      where.unidade_id = req.query.unidade_id;
     }
 
     var { count, rows } = await Aviso.findAndCountAll({
@@ -335,7 +358,7 @@ var update = async function (req, res) {
     var visivelFinal = dadosActualizar.visivel_para || aviso.visivel_para || "Todos";
     dadosActualizar = limparDestinatarios(dadosActualizar, visivelFinal);
     var erroDestino = validarDestino(visivelFinal, Object.assign(
-      { departamento_id: aviso.departamento_id, cargo_id: aviso.cargo_id, colaborador_id: aviso.colaborador_id },
+      { departamento_id: aviso.departamento_id, cargo_id: aviso.cargo_id, colaborador_id: aviso.colaborador_id, unidade_id: aviso.unidade_id },
       dadosActualizar
     ));
     if (erroDestino) {

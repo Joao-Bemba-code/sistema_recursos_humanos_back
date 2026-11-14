@@ -1,5 +1,5 @@
 var { Op } = require("sequelize");
-var { Colaborador, Departamento, Cargo, Utilizador, Contrato, Ferias, SolicitacaoFerias, Licenca, RegistoPresenca, AvaliacaoDesempenho, InscricaoFormacao, OcorrenciaDisciplinar, Vencimento, Pagamento, PedidoColaborador } = require("../models");
+var { Colaborador, Departamento, Cargo, Utilizador, Contrato, Ferias, SolicitacaoFerias, Licenca, RegistoPresenca, AvaliacaoDesempenho, InscricaoFormacao, OcorrenciaDisciplinar, Vencimento, Pagamento, PedidoColaborador, Unidade } = require("../models");
 var documentoController = require("./documentoController");
 var { temPermissao } = require("../protect/rbac");
 var { ORG_INEXISTENTE } = require("../helpers/organizacao");
@@ -12,6 +12,16 @@ var unidadeInvalida = function (valor) {
   return valor !== undefined && valor !== null && valor !== "" && UNIDADES_NEGOCIO.indexOf(valor) === -1;
 };
 
+// Garante que a unidade organizacional existe na mesma organizacao.
+var unidadeDaOrg = async function (unidadeId, organizacaoId) {
+  if (!unidadeId) return null;
+  var unidade = await Unidade.findOne({
+    where: { id: unidadeId, organizacao_id: organizacaoId },
+    attributes: ["id"],
+  }).catch(function () { return null; });
+  return unidade ? unidade.id : null;
+};
+
 var list = async function (req, res) {
   try {
     var page = parseInt(req.query.page) || 1;
@@ -22,6 +32,7 @@ var list = async function (req, res) {
     var departamento_id = req.query.departamento_id;
     var tipo = req.query.tipo_colaborador;
     var unidade_negocio = req.query.unidade_negocio;
+    var unidade_id = req.query.unidade_id;
 
     var where = {};
     // Sem organizacao na sessao nao devolve colaboradores de ninguem.
@@ -49,12 +60,19 @@ var list = async function (req, res) {
     } else if (unidade_negocio) {
       where.unidade_negocio = unidade_negocio;
     }
+    // Filtro pela unidade organizacional (unidades).
+    if (unidade_id === "sem_unidade") {
+      where.unidade_id = { [Op.eq]: null };
+    } else if (unidade_id) {
+      where.unidade_id = unidade_id;
+    }
 
     var { count, rows } = await Colaborador.findAndCountAll({
       where: where,
       include: [
         { model: Departamento, as: "departamento", attributes: ["id", "nome"] },
         { model: Cargo, as: "cargo", attributes: ["id", "nome"] },
+        { model: Unidade, as: "unidade", attributes: ["id", "nome"], required: false },
       ],
       order: [["nome_completo", "ASC"]],
       limit: limit,
@@ -83,6 +101,7 @@ var getById = async function (req, res) {
       include: [
         { model: Departamento, as: "departamento" },
         { model: Cargo, as: "cargo" },
+        { model: Unidade, as: "unidade", required: false },
         { model: Utilizador, as: "utilizador", attributes: ["id", "email", "username"] },
       ],
     });
@@ -139,7 +158,7 @@ var create = async function (req, res) {
       return res.status(403).json({ error: "Sem permissão para anexar documentos" });
     }
 
-    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "data_admissao", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico", "dias_descanso", "unidade_negocio"];
+    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "data_admissao", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico", "dias_descanso", "unidade_negocio", "unidade_id"];
     var chaves = Object.keys(dados);
     for (var i = 0; i < chaves.length; i++) {
       if (dados[chaves[i]] === "" && camposOpcionais.indexOf(chaves[i]) !== -1) {
@@ -149,6 +168,14 @@ var create = async function (req, res) {
 
     if (unidadeInvalida(dados.unidade_negocio)) {
       return res.status(400).json({ error: "Unidade de negócio inválida. Valores permitidos: " + UNIDADES_NEGOCIO.join(", ") });
+    }
+
+    if (dados.unidade_id) {
+      var unidadeCriacao = await unidadeDaOrg(dados.unidade_id, req.organizacao_id);
+      if (!unidadeCriacao) {
+        return res.status(400).json({ error: "Unidade inválida para esta organização" });
+      }
+      dados.unidade_id = unidadeCriacao;
     }
 
     // Dias de descanso: numeros de 0 (domingo) a 6 (sabado) separados por virgula
@@ -209,7 +236,7 @@ var update = async function (req, res) {
     var camposProtegidos = ["id", "organizacao_id", "numero_colaborador", "createdAt", "updatedAt", "documentos", "rascunho"];
     var camposEnum = ["genero", "estado_civil", "tipo_colaborador", "estado"];
     var camposData = ["data_nascimento", "bi_validade", "data_admissao", "data_desligamento"];
-    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "data_admissao", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico", "dias_descanso", "unidade_negocio"];
+    var camposOpcionais = ["nome_completo", "nome_curto", "data_nascimento", "data_admissao", "genero", "estado_civil", "nif", "bi", "bi_validade", "email_pessoal", "email_institucional", "telefone", "telefone_emergencia", "endereco", "cidade", "provincia", "fotografia", "numero_seguranca_social", "conta_bancaria", "banco", "iban", "habilitacoes", "formacao_academica", "curriculo", "utilizador_id", "data_desligamento", "motivo_desligamento", "observacoes", "id_biometrico", "dias_descanso", "unidade_negocio", "unidade_id"];
     var dadosActualizar = {};
 
     var documentos = Array.isArray(req.body.documentos) ? req.body.documentos : [];
@@ -250,6 +277,14 @@ var update = async function (req, res) {
       return res.status(400).json({ error: "Unidade de negócio inválida. Valores permitidos: " + UNIDADES_NEGOCIO.join(", ") });
     }
 
+    if (dadosActualizar.unidade_id) {
+      var unidadeActualizacao = await unidadeDaOrg(dadosActualizar.unidade_id, req.organizacao_id);
+      if (!unidadeActualizacao) {
+        return res.status(400).json({ error: "Unidade inválida para esta organização" });
+      }
+      dadosActualizar.unidade_id = unidadeActualizacao;
+    }
+
     // Dias de descanso: numeros de 0 (domingo) a 6 (sabado) separados por virgula
     if (dadosActualizar.dias_descanso !== undefined && dadosActualizar.dias_descanso !== null && String(dadosActualizar.dias_descanso).trim() !== "") {
       var partesDescanso = String(dadosActualizar.dias_descanso).split(",");
@@ -283,6 +318,7 @@ var update = async function (req, res) {
       include: [
         { model: Departamento, as: "departamento" },
         { model: Cargo, as: "cargo" },
+        { model: Unidade, as: "unidade", required: false },
       ],
     });
 

@@ -135,6 +135,11 @@ var Colaborador = sequelize.define("Colaborador", {
     type: DataTypes.UUID,
     allowNull: true,
   },
+  // Unidade organizacional a que o colaborador pertence (Model Unidade).
+  unidade_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
   data_admissao: {
     type: DataTypes.DATEONLY,
     allowNull: true,

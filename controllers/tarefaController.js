@@ -593,6 +593,15 @@ var list = async function (req, res) {
       whereAloc.colaborador_id = req.query.colaborador_id;
     }
 
+    // Filtro por unidade: tarefas atribuidas a colaboradores dessa unidade.
+    if (gestor && req.query.unidade_id && !req.query.colaborador_id) {
+      var idsUnidade = await Colaborador.findAll({
+        where: { organizacao_id: req.utilizador.organizacao_id, unidade_id: req.query.unidade_id },
+        attributes: ["id"],
+      });
+      whereAloc.colaborador_id = { [Op.in]: idsUnidade.map(function (c) { return c.id; }) };
+    }
+
     if (req.query.estado && ESTADOS.indexOf(req.query.estado) !== -1) {
       where.estado = req.query.estado;
     }
@@ -680,6 +689,12 @@ var estatisticas = async function (req, res) {
       }
       meuId = colab.id;
       whereAloc.colaborador_id = colab.id;
+    } else if (req.query.unidade_id) {
+      var idsUnidade = await Colaborador.findAll({
+        where: { organizacao_id: req.utilizador.organizacao_id, unidade_id: req.query.unidade_id },
+        attributes: ["id"],
+      });
+      whereAloc.colaborador_id = { [Op.in]: idsUnidade.map(function (c) { return c.id; }) };
     }
 
     var tarefas = await Tarefa.findAll({

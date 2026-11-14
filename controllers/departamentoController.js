@@ -1,13 +1,14 @@
-var { Departamento, Cargo } = require("../models");
+var { Departamento, Cargo, Seccao, Unidade, UnidadeSeccao } = require("../models");
 var { Op } = require("sequelize");
 var { ORG_INEXISTENTE } = require("../helpers/organizacao");
 
 exports.listar = async (req, res, next) => {
   try {
-    const { page = 1, limit = 15, search = "", tipo = "" } = req.query;
+    const { page = 1, limit = 15, search = "", tipo = "", departamento_id = "", seccao_id = "", unidade_id = "" } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
+    const organizacaoId = req.organizacao_id || ORG_INEXISTENTE;
 
-    const where = { organizacao_id: req.organizacao_id || ORG_INEXISTENTE };
+    const where = { organizacao_id: organizacaoId };
     if (search) {
       where[Op.or] = [
         { nome: { [Op.like]: `%${search}%` } },
@@ -16,6 +17,40 @@ exports.listar = async (req, res, next) => {
       ];
     }
     if (tipo) where.tipo = tipo;
+    if (departamento_id) where.id = departamento_id;
+
+    if (seccao_id || unidade_id) {
+      const seccaoWhere = { organizacao_id: organizacaoId };
+      if (seccao_id) seccaoWhere.id = seccao_id;
+      if (unidade_id) {
+        const unidade = await Unidade.findOne({
+          where: { id: unidade_id, organizacao_id: organizacaoId },
+          attributes: ["id"],
+        });
+        if (!unidade) {
+          return res.json({ dados: [], paginacao: { total: 0, pagina: parseInt(page), limit: parseInt(limit), total_paginas: 0 } });
+        }
+        const ligacoes = await UnidadeSeccao.findAll({
+          where: { unidade_id: unidade.id },
+          attributes: ["seccao_id"],
+        });
+        const idsSeccao = ligacoes.map(function (l) { return l.seccao_id; }).filter(Boolean);
+        if (idsSeccao.length === 0) {
+          return res.json({ dados: [], paginacao: { total: 0, pagina: parseInt(page), limit: parseInt(limit), total_paginas: 0 } });
+        }
+        seccaoWhere.id = { [Op.in]: idsSeccao };
+      }
+
+      const seccoes = await Seccao.findAll({ where: seccaoWhere, attributes: ["departamento_id"] });
+      const idsDept = [];
+      seccoes.forEach(function (s) {
+        if (s.departamento_id && idsDept.indexOf(s.departamento_id) === -1) idsDept.push(s.departamento_id);
+      });
+      if (idsDept.length === 0) {
+        return res.json({ dados: [], paginacao: { total: 0, pagina: parseInt(page), limit: parseInt(limit), total_paginas: 0 } });
+      }
+      where.id = { [Op.in]: idsDept };
+    }
 
     const { count, rows } = await Departamento.findAndCountAll({
       where,

@@ -24,7 +24,7 @@ var Aviso = sequelize.define("Aviso", {
     defaultValue: "Geral",
   },
   visivel_para: {
-    type: DataTypes.ENUM("Todos", "Departamento", "Cargo", "Perfil"),
+    type: DataTypes.ENUM("Todos", "Departamento", "Cargo", "Perfil", "Unidade"),
     defaultValue: "Todos",
   },
   departamento_id: {
@@ -32,6 +32,10 @@ var Aviso = sequelize.define("Aviso", {
     allowNull: true,
   },
   cargo_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
+  unidade_id: {
     type: DataTypes.UUID,
     allowNull: true,
   },

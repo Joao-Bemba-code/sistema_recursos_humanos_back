@@ -9,6 +9,7 @@ var { ColaboradorDocumento, ColaboradorDocumentoEvento } = require("./Colaborado
 var { Departamento, Cargo } = require("./Estrutura");
 var Seccao = require("./Seccao");
 var SeccaoMembro = require("./SeccaoMembro");
+var { Unidade, UnidadeSeccao } = require("./Unidade");
 var Contrato = require("./Contrato");
 var { Ferias, SolicitacaoFerias, Licenca } = require("./FeriasLicencas");
 var { RegistoPresenca, Turno } = require("./Assiduidade");
@@ -87,6 +88,33 @@ Seccao.hasMany(SeccaoMembro, { foreignKey: "seccao_id", as: "membros" });
 SeccaoMembro.belongsTo(Seccao, { foreignKey: "seccao_id", as: "seccao" });
 Colaborador.hasMany(SeccaoMembro, { foreignKey: "colaborador_id", as: "seccoes_membro" });
 SeccaoMembro.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador" });
+
+// Unidades organizacionais: dentro de sectores/secções, partilháveis entre
+// departamentos. O colaborador pertence a uma unidade.
+Organizacao.hasMany(Unidade, { foreignKey: "organizacao_id", as: "unidades", constraints: false });
+Unidade.belongsTo(Organizacao, { foreignKey: "organizacao_id", as: "organizacao", constraints: false });
+
+Unidade.belongsToMany(Seccao, {
+  through: { model: UnidadeSeccao },
+  as: "seccoes",
+  foreignKey: "unidade_id",
+  otherKey: "seccao_id",
+  constraints: false,
+});
+Seccao.belongsToMany(Unidade, {
+  through: { model: UnidadeSeccao },
+  as: "unidades",
+  foreignKey: "seccao_id",
+  otherKey: "unidade_id",
+  constraints: false,
+});
+
+Unidade.hasMany(UnidadeSeccao, { foreignKey: "unidade_id", as: "ligacoes", constraints: false });
+UnidadeSeccao.belongsTo(Unidade, { foreignKey: "unidade_id", as: "unidade", constraints: false });
+UnidadeSeccao.belongsTo(Seccao, { foreignKey: "seccao_id", as: "seccao", constraints: false });
+
+Unidade.hasMany(Colaborador, { foreignKey: "unidade_id", as: "colaboradores", constraints: false });
+Colaborador.belongsTo(Unidade, { foreignKey: "unidade_id", as: "unidade", constraints: false });
 
 // Departamento -> Colaboradores
 Departamento.hasMany(Colaborador, { foreignKey: "departamento_id", as: "colaboradores" });
@@ -217,6 +245,10 @@ Cargo.hasMany(Aviso, { foreignKey: "cargo_id", as: "avisos" });
 Aviso.belongsTo(Cargo, { foreignKey: "cargo_id", as: "cargo" });
 Colaborador.hasMany(Aviso, { foreignKey: "colaborador_id", as: "avisos_destino" });
 Aviso.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador_destino" });
+
+// Aviso -> Unidade (visibilidade por unidade organizacional)
+Unidade.hasMany(Aviso, { foreignKey: "unidade_id", as: "avisos", constraints: false });
+Aviso.belongsTo(Unidade, { foreignKey: "unidade_id", as: "unidade", constraints: false });
 
 // Aviso -> Anexos (guardados na BD). Sem FK a nivel de BD (TiDB).
 Aviso.hasMany(ComunicacaoAnexo, { foreignKey: "comunicado_id", as: "anexos", constraints: false });
@@ -588,6 +620,8 @@ module.exports = {
   Cargo,
   Seccao,
   SeccaoMembro,
+  Unidade,
+  UnidadeSeccao,
   Contrato,
   Ferias,
   SolicitacaoFerias,

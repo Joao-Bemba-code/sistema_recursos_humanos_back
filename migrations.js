@@ -200,7 +200,21 @@ var migrations = async function () {
     await adicionarColuna("avisos", "criado_por", "VARCHAR(36) NULL");
     await adicionarColuna("avisos", "cargo_id", "CHAR(36) NULL");
     await adicionarColuna("avisos", "colaborador_id", "CHAR(36) NULL");
-    console.log(" Colunas de destinatarios (cargo_id/colaborador_id) em 'avisos' garantidas!");
+    await adicionarColuna("avisos", "unidade_id", "CHAR(36) NULL");
+    try {
+      var colVisivel = await sequelize.query("SHOW COLUMNS FROM `avisos` LIKE 'visivel_para'");
+      var linhasVisivel = Array.isArray(colVisivel[0]) ? colVisivel[0] : colVisivel;
+      if (linhasVisivel.length > 0) {
+        var tipoVisivel = linhasVisivel[0].Type || "";
+        if (tipoVisivel.indexOf("Unidade") === -1) {
+          await sequelize.query("ALTER TABLE `avisos` MODIFY COLUMN `visivel_para` ENUM('Todos','Departamento','Cargo','Perfil','Unidade') NOT NULL DEFAULT 'Todos'");
+          console.log(" Enum 'visivel_para' de avisos expandido (Unidade)!");
+        }
+      }
+    } catch (e) {
+      console.log(" Aviso: problema ao expandir enum visivel_para de avisos:", e.message);
+    }
+    console.log(" Colunas de destinatarios (cargo_id/colaborador_id/unidade_id) em 'avisos' garantidas!");
 
     // ==================== COLABORADORES ====================
     await alterarColuna("colaboradores", "nome_completo", "VARCHAR(200) NULL");
@@ -306,14 +320,56 @@ var migrations = async function () {
     await adicionarColuna("seccoes", "telefone", "VARCHAR(20) NULL");
     await adicionarColuna("seccoes", "email", "VARCHAR(150) NULL");
     await adicionarColuna("seccoes", "localizacao", "VARCHAR(200) NULL");
-    // Sector e Secção sao o mesmo nivel; os registos antigos ficam "Secção".
+    // Sector, Secção, Gabinete e Direcção ficam no mesmo nivel dentro do
+    // departamento; os registos antigos ficam "Secção".
     await adicionarColuna("seccoes", "tipo", "VARCHAR(30) NULL DEFAULT 'Secção'");
     await sequelize.query(
       "UPDATE `seccoes` SET `tipo` = 'Secção' WHERE `tipo` IS NULL OR `tipo` = ''"
     );
+    // Uniformiza os valores vindos do ENUM sem cedilha (Direccao/Seccao).
+    await sequelize.query("UPDATE `seccoes` SET `tipo` = 'Secção' WHERE `tipo` = 'Seccao'");
+    await sequelize.query("UPDATE `seccoes` SET `tipo` = 'Direcção' WHERE `tipo` = 'Direccao'");
 
     // ==================== SECCOES_COLABORADORES ====================
     await alterarColuna("seccoes_colaboradores", "funcao", "VARCHAR(100) NULL DEFAULT NULL");
+
+    // ==================== UNIDADES ====================
+    // Unidade organizacional dentro de um sector/secção. A mesma unidade pode
+    // ser ligada a sectores de outros departamentos (unidades_seccoes).
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `unidades` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`organizacao_id` CHAR(36) NULL, " +
+      "`nome` VARCHAR(150) NOT NULL, " +
+      "`codigo` VARCHAR(20) NULL, " +
+      "`descricao` TEXT NULL, " +
+      "`responsavel_nome` VARCHAR(200) NULL, " +
+      "`telefone` VARCHAR(20) NULL, " +
+      "`email` VARCHAR(150) NULL, " +
+      "`activo` TINYINT(1) NOT NULL DEFAULT 1, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "KEY `unidades_organizacao_idx` (`organizacao_id`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    console.log(" Tabela 'unidades' garantida!");
+
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `unidades_seccoes` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`unidade_id` CHAR(36) NOT NULL, " +
+      "`seccao_id` CHAR(36) NOT NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "UNIQUE KEY `unidades_seccoes_unique` (`unidade_id`, `seccao_id`), " +
+      "KEY `unidades_seccoes_seccao_idx` (`seccao_id`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    console.log(" Tabela 'unidades_seccoes' garantida!");
+
+    await adicionarColuna("colaboradores", "unidade_id", "CHAR(36) NULL");
 
     // ==================== ENUM TIPO DE PEDIDOS ====================
     try {

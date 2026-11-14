@@ -2,6 +2,9 @@ var { Seccao, SeccaoMembro, Colaborador, Departamento } = require("../models");
 var { Op } = require("sequelize");
 var { ORG_INEXISTENTE, incluirColaboradorDaOrg, colaboradorNaOrg } = require("../helpers/organizacao");
 
+// Unidades que podem ficar dentro de um departamento.
+var TIPOS_UNIDADE = ["Sector", "Secção", "Gabinete", "Direcção"];
+
 exports.listar = async (req, res, next) => {
   try {
     const { page = 1, limit = 50, search = "", departamento_id = "", activo = "", tipo = "" } = req.query;
@@ -68,8 +71,8 @@ exports.criar = async (req, res, next) => {
       return res.status(400).json({ error: "O departamento é obrigatório" });
     }
     if (!dados.tipo) dados.tipo = "Secção";
-    if (dados.tipo !== "Sector" && dados.tipo !== "Secção") {
-      return res.status(400).json({ error: "O tipo deve ser Sector ou Secção" });
+    if (TIPOS_UNIDADE.indexOf(dados.tipo) === -1) {
+      return res.status(400).json({ error: "O tipo deve ser Sector, Secção, Gabinete ou Direcção" });
     }
     const dept = await Departamento.findOne({
       where: { id: dados.departamento_id, organizacao_id: req.organizacao_id },
@@ -94,8 +97,8 @@ exports.actualizar = async (req, res, next) => {
     const dados = Object.assign({}, req.body);
     delete dados.id;
     delete dados.organizacao_id;
-    if (dados.tipo !== undefined && dados.tipo !== "Sector" && dados.tipo !== "Secção") {
-      return res.status(400).json({ error: "O tipo deve ser Sector ou Secção" });
+    if (dados.tipo !== undefined && TIPOS_UNIDADE.indexOf(dados.tipo) === -1) {
+      return res.status(400).json({ error: "O tipo deve ser Sector, Secção, Gabinete ou Direcção" });
     }
     await sec.update(dados);
     res.json({ dados: sec, message: "Secção actualizada com sucesso" });
