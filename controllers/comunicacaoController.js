@@ -1,5 +1,5 @@
 var { Op } = require("sequelize");
-var { Aviso, ComunicacaoAnexo, Utilizador, Colaborador, Departamento, Cargo, Unidade } = require("../models");
+var { Aviso, ComunicacaoAnexo, Utilizador, Colaborador, Departamento, Cargo, Unidade, Seccao, UnidadeSeccao } = require("../models");
 var { perfisUtilizador, fundirPermissoes } = require("../protect/rbac");
 
 // Limites dos anexos (guardados na BD em base64): ate 8 ficheiros, cada um
@@ -132,6 +132,13 @@ var destinatarios = async function (req, res) {
     var unidades = await Unidade.findAll({
       where: { organizacao_id: orgId },
       attributes: ["id", "nome", "codigo"],
+      include: [{
+        model: Seccao,
+        as: "seccoes",
+        attributes: ["id", "nome", "departamento_id"],
+        through: { attributes: [] },
+        include: [{ model: Departamento, as: "departamento", attributes: ["id", "nome"] }],
+      }],
       order: [["nome", "ASC"]],
     });
 
@@ -238,6 +245,31 @@ var list = async function (req, res) {
     // Filtro por unidade (gestores): ver comunicados dirigidos a uma unidade.
     if (gestor && req.query.unidade_id) {
       where.unidade_id = req.query.unidade_id;
+    }
+
+    // Filtro por departamento (gestores): comunicados dirigidos ao departamento
+    // ou a unidades que pertencem a sectores desse departamento.
+    if (gestor && req.query.departamento_id) {
+      var deptId = req.query.departamento_id;
+      var seccoesDept = await Seccao.findAll({
+        where: { organizacao_id: req.utilizador.organizacao_id, departamento_id: deptId },
+        attributes: ["id"],
+      });
+      var idsSeccaoDept = seccoesDept.map(function (s) { return s.id; });
+      var idsUnidadeDept = [];
+      if (idsSeccaoDept.length > 0) {
+        var ligacoesDept = await UnidadeSeccao.findAll({
+          where: { seccao_id: { [Op.in]: idsSeccaoDept } },
+          attributes: ["unidade_id"],
+        });
+        ligacoesDept.forEach(function (l) {
+          if (l.unidade_id && idsUnidadeDept.indexOf(l.unidade_id) === -1) idsUnidadeDept.push(l.unidade_id);
+        });
+      }
+      var alvosDept = [{ departamento_id: deptId }];
+      if (idsUnidadeDept.length > 0) alvosDept.push({ unidade_id: { [Op.in]: idsUnidadeDept } });
+      where[Op.and] = where[Op.and] || [];
+      where[Op.and].push({ [Op.or]: alvosDept });
     }
 
     var { count, rows } = await Aviso.findAndCountAll({

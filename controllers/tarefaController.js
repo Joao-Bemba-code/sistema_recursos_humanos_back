@@ -593,13 +593,17 @@ var list = async function (req, res) {
       whereAloc.colaborador_id = req.query.colaborador_id;
     }
 
-    // Filtro por unidade: tarefas atribuidas a colaboradores dessa unidade.
-    if (gestor && req.query.unidade_id && !req.query.colaborador_id) {
-      var idsUnidade = await Colaborador.findAll({
-        where: { organizacao_id: req.utilizador.organizacao_id, unidade_id: req.query.unidade_id },
+    // Filtro por unidade/departamento: tarefas atribuidas a colaboradores
+    // dessa unidade e/ou desse departamento.
+    if (gestor && (req.query.unidade_id || req.query.departamento_id) && !req.query.colaborador_id) {
+      var whereColabFiltro = { organizacao_id: req.utilizador.organizacao_id };
+      if (req.query.unidade_id) whereColabFiltro.unidade_id = req.query.unidade_id;
+      if (req.query.departamento_id) whereColabFiltro.departamento_id = req.query.departamento_id;
+      var colabsFiltro = await Colaborador.findAll({
+        where: whereColabFiltro,
         attributes: ["id"],
       });
-      whereAloc.colaborador_id = { [Op.in]: idsUnidade.map(function (c) { return c.id; }) };
+      whereAloc.colaborador_id = { [Op.in]: colabsFiltro.map(function (c) { return c.id; }) };
     }
 
     if (req.query.estado && ESTADOS.indexOf(req.query.estado) !== -1) {
@@ -689,12 +693,15 @@ var estatisticas = async function (req, res) {
       }
       meuId = colab.id;
       whereAloc.colaborador_id = colab.id;
-    } else if (req.query.unidade_id) {
-      var idsUnidade = await Colaborador.findAll({
-        where: { organizacao_id: req.utilizador.organizacao_id, unidade_id: req.query.unidade_id },
+    } else if (req.query.unidade_id || req.query.departamento_id) {
+      var whereColabStats = { organizacao_id: req.utilizador.organizacao_id };
+      if (req.query.unidade_id) whereColabStats.unidade_id = req.query.unidade_id;
+      if (req.query.departamento_id) whereColabStats.departamento_id = req.query.departamento_id;
+      var idsColabStats = await Colaborador.findAll({
+        where: whereColabStats,
         attributes: ["id"],
       });
-      whereAloc.colaborador_id = { [Op.in]: idsUnidade.map(function (c) { return c.id; }) };
+      whereAloc.colaborador_id = { [Op.in]: idsColabStats.map(function (c) { return c.id; }) };
     }
 
     var tarefas = await Tarefa.findAll({
