@@ -242,10 +242,10 @@ var updateEstado = async function (req, res) {
     // estados ja tem decisao e nao voltam atras por esta via.
     var estadoAnterior = pedido.estado;
     if (estadoAnterior !== "pendente" && estadoAnterior !== "processando") {
-      return res.status(400).json({ error: "Este pedido ja foi decidido e nao pode voltar a ser processado" });
+      return res.status(400).json({ error: "Este pedido ja foi decidido e nao pode voltar a ser analisado" });
     }
     if (estadoAnterior === "processando" && novoEstado === "processando") {
-      return res.status(400).json({ error: "O pedido ja esta a ser processado" });
+      return res.status(400).json({ error: "O pedido ja esta em analise" });
     }
 
     var dadosEstado = { estado: novoEstado };
@@ -305,12 +305,12 @@ var updateEstado = async function (req, res) {
         ? "Pedido Aprovado"
         : novoEstado === "rejeitado"
           ? "Pedido Rejeitado"
-          : "Pedido em processamento";
+          : "Pedido em análise";
       var mensagemNotificacao = novoEstado === "aprovado"
         ? "O seu pedido '" + pedido.titulo + "' foi aprovado."
         : novoEstado === "rejeitado"
           ? "O seu pedido '" + pedido.titulo + "' foi rejeitado."
-          : "O seu pedido '" + pedido.titulo + "' está a ser processado.";
+          : "O seu pedido '" + pedido.titulo + "' está em análise.";
       var tipoNotificacao = novoEstado === "aprovado"
         ? "success"
         : novoEstado === "rejeitado" ? "error" : "info";
