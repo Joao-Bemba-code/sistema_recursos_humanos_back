@@ -27,8 +27,10 @@ var PedidoColaborador = sequelize.define("PedidoColaborador", {
     type: DataTypes.TEXT,
     allowNull: true,
   },
+  // 'processando' e o estado intermedio: o admin aceita o pedido e o
+  // colaborador passa a ver que esta a ser tratado, antes da decisao final.
   estado: {
-    type: DataTypes.ENUM("pendente", "aprovado", "rejeitado", "cancelado"),
+    type: DataTypes.ENUM("pendente", "processando", "aprovado", "rejeitado", "cancelado"),
     defaultValue: "pendente",
   },
   dados: {

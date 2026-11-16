@@ -233,20 +233,33 @@ var updateEstado = async function (req, res) {
     }
 
     var novoEstado = req.body.estado;
-    if (!novoEstado || ["aprovado", "rejeitado"].indexOf(novoEstado) === -1) {
-      return res.status(400).json({ error: "Estado invalido. Use 'aprovado' ou 'rejeitado'" });
+    if (!novoEstado || ["processando", "aprovado", "rejeitado"].indexOf(novoEstado) === -1) {
+      return res.status(400).json({ error: "Estado invalido. Use 'processando', 'aprovado' ou 'rejeitado'" });
     }
 
-    if (pedido.estado !== "pendente") {
-      return res.status(400).json({ error: "Apenas pedidos pendentes podem ser processados" });
+    // 'pendente' aceita os tres destinos. 'processando' (o admin ja aceitou o
+    // pedido e esta a trata-lo) aceita apenas a decisao final. Os restantes
+    // estados ja tem decisao e nao voltam atras por esta via.
+    var estadoAnterior = pedido.estado;
+    if (estadoAnterior !== "pendente" && estadoAnterior !== "processando") {
+      return res.status(400).json({ error: "Este pedido ja foi decidido e nao pode voltar a ser processado" });
+    }
+    if (estadoAnterior === "processando" && novoEstado === "processando") {
+      return res.status(400).json({ error: "O pedido ja esta a ser processado" });
     }
 
-    await pedido.update({
-      estado: novoEstado,
-      responded_by: req.utilizador.id,
-      responded_at: new Date(),
-      comentario: req.body.comentario || null,
-    });
+    var dadosEstado = { estado: novoEstado };
+    if (novoEstado === "processando") {
+      // Ainda nao ha resposta ao colaborador, por isso responded_by/responded_at
+      // ficam vazios ate a decisao final. O comentario e opcional nesta fase.
+      if (req.body.comentario) dadosEstado.comentario = req.body.comentario;
+    } else {
+      dadosEstado.responded_by = req.utilizador.id;
+      dadosEstado.responded_at = new Date();
+      dadosEstado.comentario = req.body.comentario || null;
+    }
+
+    await pedido.update(dadosEstado);
 
     if (novoEstado === "aprovado" && pedido.tipo === "justificacao") {
       try {
@@ -290,11 +303,17 @@ var updateEstado = async function (req, res) {
     if (utilizadorColaborador) {
       var tituloNotificacao = novoEstado === "aprovado"
         ? "Pedido Aprovado"
-        : "Pedido Rejeitado";
+        : novoEstado === "rejeitado"
+          ? "Pedido Rejeitado"
+          : "Pedido em processamento";
       var mensagemNotificacao = novoEstado === "aprovado"
         ? "O seu pedido '" + pedido.titulo + "' foi aprovado."
-        : "O seu pedido '" + pedido.titulo + "' foi rejeitado.";
-      var tipoNotificacao = novoEstado === "aprovado" ? "success" : "error";
+        : novoEstado === "rejeitado"
+          ? "O seu pedido '" + pedido.titulo + "' foi rejeitado."
+          : "O seu pedido '" + pedido.titulo + "' está a ser processado.";
+      var tipoNotificacao = novoEstado === "aprovado"
+        ? "success"
+        : novoEstado === "rejeitado" ? "error" : "info";
 
       var notifResult = await notificacaoController.create({
         organizacao_id: req.utilizador.organizacao_id,
@@ -348,6 +367,10 @@ var getStats = async function (req, res) {
       where: Object.assign({}, baseWhere, { estado: "pendente" }),
     });
 
+    var processando = await PedidoColaborador.count({
+      where: Object.assign({}, baseWhere, { estado: "processando" }),
+    });
+
     var aprovados = await PedidoColaborador.count({
       where: Object.assign({}, baseWhere, { estado: "aprovado" }),
     });
@@ -363,10 +386,11 @@ var getStats = async function (req, res) {
     return res.status(200).json({
       dados: {
         pendentes: pendentes,
+        processando: processando,
         aprovados: aprovados,
         rejeitados: rejeitados,
         cancelados: cancelados,
-        total: pendentes + aprovados + rejeitados + cancelados,
+        total: pendentes + processando + aprovados + rejeitados + cancelados,
       },
     });
   } catch (e) {

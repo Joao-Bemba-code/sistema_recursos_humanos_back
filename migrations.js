@@ -386,6 +386,24 @@ var migrations = async function () {
       console.log(" Aviso: problema ao expandir enum tipo de pedidos_colaborador:", e.message);
     }
 
+    // ==================== ENUM ESTADO DE PEDIDOS ====================
+    // Acrescenta 'processando', o estado intermedio em que o admin aceita o
+    // pedido e o colaborador ve que ja esta a ser tratado (antes de haver
+    // aprovacao ou rejeicao).
+    try {
+      var estadosPedidos = await sequelize.query("SHOW COLUMNS FROM `pedidos_colaborador` LIKE 'estado'");
+      var linhasEstado = Array.isArray(estadosPedidos[0]) ? estadosPedidos[0] : estadosPedidos;
+      if (linhasEstado.length > 0) {
+        var estadoAtual = linhasEstado[0].Type || "";
+        if (estadoAtual.indexOf("processando") === -1) {
+          await sequelize.query("ALTER TABLE `pedidos_colaborador` MODIFY COLUMN `estado` ENUM('pendente','processando','aprovado','rejeitado','cancelado') NOT NULL DEFAULT 'pendente'");
+          console.log(" Enum 'estado' de pedidos_colaborador expandido (processando)!");
+        }
+      }
+    } catch (e) {
+      console.log(" Aviso: problema ao expandir enum estado de pedidos_colaborador:", e.message);
+    }
+
     // ==================== ANEXOS DE COMUNICADOS (guardados na BD) ====================
     // Os documentos ficam na base de dados (base64) para sobreviverem aos
     // reinicios/deploys da instancia gratuita do Render (o disco e volatil).

@@ -1,5 +1,5 @@
 var { Op } = require("sequelize");
-var { Colaborador, Departamento, Cargo, Utilizador, Contrato, Ferias, SolicitacaoFerias, Licenca, RegistoPresenca, AvaliacaoDesempenho, InscricaoFormacao, OcorrenciaDisciplinar, Vencimento, Pagamento, PedidoColaborador, Unidade } = require("../models");
+var { Colaborador, Departamento, Cargo, Utilizador, Contrato, Ferias, SolicitacaoFerias, Licenca, RegistoPresenca, AvaliacaoDesempenho, InscricaoFormacao, OcorrenciaDisciplinar, Vencimento, Pagamento, PedidoColaborador, Unidade, Seccao, SeccaoMembro, UnidadeSeccao } = require("../models");
 var documentoController = require("./documentoController");
 var { temPermissao } = require("../protect/rbac");
 var { ORG_INEXISTENTE } = require("../helpers/organizacao");
@@ -20,6 +20,45 @@ var unidadeDaOrg = async function (unidadeId, organizacaoId) {
     attributes: ["id"],
   }).catch(function () { return null; });
   return unidade ? unidade.id : null;
+};
+
+// Um colaborador pertence a um departamento por tres vias, conforme a altura
+// em que foi registado: a coluna directa departamento_id (registos antigos),
+// a unidade organizacional (as unidades ficam ligadas a seccoes de varios
+// departamentos) ou a seccao em que esta inscrito. Sem juntar as tres, o
+// filtro por departamento falhava para quem so tem unidade ou seccao.
+var ligacoesDoDepartamento = async function (departamentoId, organizacaoId) {
+  var resultado = { unidades: [], colaboradores: [] };
+
+  var seccoes = await Seccao.findAll({
+    where: { departamento_id: departamentoId, organizacao_id: organizacaoId },
+    attributes: ["id"],
+  }).catch(function () { return []; });
+  if (!seccoes.length) return resultado;
+
+  var idsSeccoes = seccoes.map(function (s) { return s.id; });
+
+  var unidades = await UnidadeSeccao.findAll({
+    where: { seccao_id: { [Op.in]: idsSeccoes } },
+    attributes: ["unidade_id"],
+  }).catch(function () { return []; });
+  unidades.forEach(function (u) {
+    if (u.unidade_id && resultado.unidades.indexOf(u.unidade_id) === -1) {
+      resultado.unidades.push(u.unidade_id);
+    }
+  });
+
+  var membros = await SeccaoMembro.findAll({
+    where: { seccao_id: { [Op.in]: idsSeccoes } },
+    attributes: ["colaborador_id"],
+  }).catch(function () { return []; });
+  membros.forEach(function (m) {
+    if (m.colaborador_id && resultado.colaboradores.indexOf(m.colaborador_id) === -1) {
+      resultado.colaboradores.push(m.colaborador_id);
+    }
+  });
+
+  return resultado;
 };
 
 var list = async function (req, res) {
@@ -52,7 +91,19 @@ var list = async function (req, res) {
     } else {
       where.estado = { [Op.ne]: "Desligado" };
     }
-    if (departamento_id) where.departamento_id = departamento_id;
+    if (departamento_id) {
+      // Aceita os tres caminhos para o mesmo departamento: coluna directa,
+      // unidade organizacional e seccao de que o colaborador e membro.
+      var ligacoesDep = await ligacoesDoDepartamento(departamento_id, where.organizacao_id);
+      var porDepartamento = [{ departamento_id: departamento_id }];
+      if (ligacoesDep.unidades.length) {
+        porDepartamento.push({ unidade_id: { [Op.in]: ligacoesDep.unidades } });
+      }
+      if (ligacoesDep.colaboradores.length) {
+        porDepartamento.push({ id: { [Op.in]: ligacoesDep.colaboradores } });
+      }
+      where[Op.or] = porDepartamento;
+    }
     if (tipo) where.tipo_colaborador = tipo;
     // "sem_unidade" filtra os colaboradores ainda sem unidade de negocio
     if (unidade_negocio === "sem_unidade") {
