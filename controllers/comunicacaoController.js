@@ -1,6 +1,7 @@
 var { Op } = require("sequelize");
 var { Aviso, ComunicacaoAnexo, Utilizador, Colaborador, Departamento, Cargo, Unidade, Seccao, UnidadeSeccao } = require("../models");
 var { perfisUtilizador, fundirPermissoes } = require("../protect/rbac");
+var { vinculosDoColaborador } = require("../helpers/vinculos");
 
 // Limites dos anexos (guardados na BD em base64): ate 8 ficheiros, cada um
 // ate ~10MB depois de codificado em base64.
@@ -210,15 +211,18 @@ var list = async function (req, res) {
         { visivel_para: { [Op.in]: ["Departamento", "Cargo", "Perfil", "Unidade"] }, departamento_id: null, cargo_id: null, colaborador_id: null, unidade_id: null },
       ];
       if (meuColab) {
-        if (meuColab.departamento_id) {
-          alternativas.push({ visivel_para: "Departamento", departamento_id: meuColab.departamento_id });
-        }
+        // Departamentos e unidades do colaborador: coluna directa, seccao em
+        // que esta inscrito e seccoes a que a sua unidade esta vinculada.
+        var vinculos = await vinculosDoColaborador(meuColab.id, req.utilizador.organizacao_id);
+        vinculos.departamentos.forEach(function (departamentoId) {
+          alternativas.push({ visivel_para: "Departamento", departamento_id: departamentoId });
+        });
         if (meuColab.cargo_id) {
           alternativas.push({ visivel_para: "Cargo", cargo_id: meuColab.cargo_id });
         }
-        if (meuColab.unidade_id) {
-          alternativas.push({ visivel_para: "Unidade", unidade_id: meuColab.unidade_id });
-        }
+        vinculos.unidades.forEach(function (unidadeId) {
+          alternativas.push({ visivel_para: "Unidade", unidade_id: unidadeId });
+        });
         alternativas.push({ visivel_para: "Perfil", colaborador_id: meuColab.id });
       }
       where[Op.and].push({ [Op.or]: alternativas });

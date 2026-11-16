@@ -1,6 +1,7 @@
 var { Op } = require("sequelize");
 var { Unidade, UnidadeSeccao, Seccao, Departamento, Colaborador } = require("../models");
 var { ORG_INEXISTENTE } = require("../helpers/organizacao");
+var { colaboradoresDaUnidade, seccoesDaUnidade, membrosDasSeccoes } = require("../helpers/vinculos");
 
 var incluirSeccoes = function () {
   return {
@@ -178,8 +179,8 @@ exports.eliminar = async (req, res, next) => {
     });
     if (!unidade) return res.status(404).json({ error: "Unidade não encontrada" });
 
-    var total = await Colaborador.count({ where: { unidade_id: unidade.id } });
-    if (total > 0) {
+    var idsVinculados = await colaboradoresDaUnidade(unidade.id, req.organizacao_id || ORG_INEXISTENTE);
+    if (idsVinculados.length > 0) {
       return res.status(400).json({ error: "Esta unidade tem colaboradores associados. Mova-os primeiro." });
     }
 
@@ -199,8 +200,11 @@ exports.colaboradores = async (req, res, next) => {
     });
     if (!unidade) return res.status(404).json({ error: "Unidade não encontrada" });
 
+    // Membros da unidade: inscritos nas seccoes a que a unidade esta
+    // vinculada, mais os associados directamente.
+    var idsMembros = await colaboradoresDaUnidade(unidade.id, req.organizacao_id || ORG_INEXISTENTE);
     var lista = await Colaborador.findAll({
-      where: { unidade_id: unidade.id, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
+      where: { id: { [Op.in]: idsMembros }, organizacao_id: req.organizacao_id || ORG_INEXISTENTE },
       attributes: ["id", "nome_completo", "numero_colaborador", "estado", "email_institucional"],
       order: [["nome_completo", "ASC"]],
     });
@@ -239,11 +243,23 @@ exports.removerColaborador = async (req, res, next) => {
     var colaborador = await Colaborador.findOne({
       where: {
         id: req.params.colaboradorId,
-        unidade_id: unidade.id,
         organizacao_id: req.organizacao_id || ORG_INEXISTENTE,
       },
     });
-    if (!colaborador) return res.status(404).json({ error: "Colaborador não pertence a esta unidade" });
+    if (!colaborador) return res.status(404).json({ error: "Colaborador não encontrado" });
+
+    // Se o vinculo vem da seccao, limpar a coluna directa nao o retira da
+    // unidade. Nesse caso explica-se onde se altera.
+    var idsSeccoes = await seccoesDaUnidade(unidade.id, req.organizacao_id || ORG_INEXISTENTE);
+    var membrosSeccao = await membrosDasSeccoes(idsSeccoes);
+    if (membrosSeccao.indexOf(colaborador.id) !== -1) {
+      return res.status(400).json({
+        error: "Este colaborador pertence à unidade pela secção em que está inscrito. Altere a secção dele para o retirar da unidade.",
+      });
+    }
+    if (colaborador.unidade_id !== unidade.id) {
+      return res.status(404).json({ error: "Colaborador não pertence a esta unidade" });
+    }
 
     await colaborador.update({ unidade_id: null });
     return res.json({ message: "Colaborador removido da unidade" });

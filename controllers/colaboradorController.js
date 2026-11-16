@@ -1,8 +1,9 @@
 var { Op } = require("sequelize");
-var { Colaborador, Departamento, Cargo, Utilizador, Contrato, Ferias, SolicitacaoFerias, Licenca, RegistoPresenca, AvaliacaoDesempenho, InscricaoFormacao, OcorrenciaDisciplinar, Vencimento, Pagamento, PedidoColaborador, Unidade, Seccao, SeccaoMembro, UnidadeSeccao } = require("../models");
+var { Colaborador, Departamento, Cargo, Utilizador, Contrato, Ferias, SolicitacaoFerias, Licenca, RegistoPresenca, AvaliacaoDesempenho, InscricaoFormacao, OcorrenciaDisciplinar, Vencimento, Pagamento, PedidoColaborador, Unidade } = require("../models");
 var documentoController = require("./documentoController");
 var { temPermissao } = require("../protect/rbac");
 var { ORG_INEXISTENTE } = require("../helpers/organizacao");
+var { colaboradoresDoDepartamento, colaboradoresDaUnidade, colaboradoresSemUnidade } = require("../helpers/vinculos");
 
 // Unidades de negocio fixas da grafica (mesma lista do ENUM do modelo
 // Colaborador e de UNIDADES_NEGOCIO_VALIDAS na folha salarial)
@@ -22,45 +23,6 @@ var unidadeDaOrg = async function (unidadeId, organizacaoId) {
   return unidade ? unidade.id : null;
 };
 
-// Um colaborador pertence a um departamento por tres vias, conforme a altura
-// em que foi registado: a coluna directa departamento_id (registos antigos),
-// a unidade organizacional (as unidades ficam ligadas a seccoes de varios
-// departamentos) ou a seccao em que esta inscrito. Sem juntar as tres, o
-// filtro por departamento falhava para quem so tem unidade ou seccao.
-var ligacoesDoDepartamento = async function (departamentoId, organizacaoId) {
-  var resultado = { unidades: [], colaboradores: [] };
-
-  var seccoes = await Seccao.findAll({
-    where: { departamento_id: departamentoId, organizacao_id: organizacaoId },
-    attributes: ["id"],
-  }).catch(function () { return []; });
-  if (!seccoes.length) return resultado;
-
-  var idsSeccoes = seccoes.map(function (s) { return s.id; });
-
-  var unidades = await UnidadeSeccao.findAll({
-    where: { seccao_id: { [Op.in]: idsSeccoes } },
-    attributes: ["unidade_id"],
-  }).catch(function () { return []; });
-  unidades.forEach(function (u) {
-    if (u.unidade_id && resultado.unidades.indexOf(u.unidade_id) === -1) {
-      resultado.unidades.push(u.unidade_id);
-    }
-  });
-
-  var membros = await SeccaoMembro.findAll({
-    where: { seccao_id: { [Op.in]: idsSeccoes } },
-    attributes: ["colaborador_id"],
-  }).catch(function () { return []; });
-  membros.forEach(function (m) {
-    if (m.colaborador_id && resultado.colaboradores.indexOf(m.colaborador_id) === -1) {
-      resultado.colaboradores.push(m.colaborador_id);
-    }
-  });
-
-  return resultado;
-};
-
 var list = async function (req, res) {
   try {
     var page = parseInt(req.query.page) || 1;
@@ -74,16 +36,19 @@ var list = async function (req, res) {
     var unidade_id = req.query.unidade_id;
 
     var where = {};
+    var condicoes = [];
     // Sem organizacao na sessao nao devolve colaboradores de ninguem.
     where.organizacao_id = req.organizacao_id || ORG_INEXISTENTE;
 
     if (search) {
-      where[Op.or] = [
-        { nome_completo: { [Op.like]: "%" + search + "%" } },
-        { numero_colaborador: { [Op.like]: "%" + search + "%" } },
-        { nif: { [Op.like]: "%" + search + "%" } },
-        { email_pessoal: { [Op.like]: "%" + search + "%" } },
-      ];
+      condicoes.push({
+        [Op.or]: [
+          { nome_completo: { [Op.like]: "%" + search + "%" } },
+          { numero_colaborador: { [Op.like]: "%" + search + "%" } },
+          { nif: { [Op.like]: "%" + search + "%" } },
+          { email_pessoal: { [Op.like]: "%" + search + "%" } },
+        ],
+      });
     }
 
     if (estado) {
@@ -92,17 +57,10 @@ var list = async function (req, res) {
       where.estado = { [Op.ne]: "Desligado" };
     }
     if (departamento_id) {
-      // Aceita os tres caminhos para o mesmo departamento: coluna directa,
-      // unidade organizacional e seccao de que o colaborador e membro.
-      var ligacoesDep = await ligacoesDoDepartamento(departamento_id, where.organizacao_id);
-      var porDepartamento = [{ departamento_id: departamento_id }];
-      if (ligacoesDep.unidades.length) {
-        porDepartamento.push({ unidade_id: { [Op.in]: ligacoesDep.unidades } });
-      }
-      if (ligacoesDep.colaboradores.length) {
-        porDepartamento.push({ id: { [Op.in]: ligacoesDep.colaboradores } });
-      }
-      where[Op.or] = porDepartamento;
+      // Pessoas vinculadas ao departamento: pela seccao, pelas unidades
+      // vinculadas ao departamento ou pela coluna directa.
+      var idsDepartamento = await colaboradoresDoDepartamento(departamento_id, where.organizacao_id);
+      condicoes.push({ id: { [Op.in]: idsDepartamento } });
     }
     if (tipo) where.tipo_colaborador = tipo;
     // "sem_unidade" filtra os colaboradores ainda sem unidade de negocio
@@ -111,12 +69,18 @@ var list = async function (req, res) {
     } else if (unidade_negocio) {
       where.unidade_negocio = unidade_negocio;
     }
-    // Filtro pela unidade organizacional (unidades).
+    // Filtro pela unidade organizacional (unidades): inclui as pessoas
+    // inscritas nas seccoes a que a unidade esta vinculada, e nao apenas
+    // aquelas que ficaram gravadas na coluna unidade_id.
     if (unidade_id === "sem_unidade") {
-      where.unidade_id = { [Op.eq]: null };
+      var idsSemUnidade = await colaboradoresSemUnidade(where.organizacao_id);
+      condicoes.push({ id: { [Op.in]: idsSemUnidade } });
     } else if (unidade_id) {
-      where.unidade_id = unidade_id;
+      var idsUnidade = await colaboradoresDaUnidade(unidade_id, where.organizacao_id);
+      condicoes.push({ id: { [Op.in]: idsUnidade } });
     }
+
+    if (condicoes.length) where[Op.and] = condicoes;
 
     var { count, rows } = await Colaborador.findAndCountAll({
       where: where,
