@@ -1,5 +1,5 @@
 var { Op } = require("sequelize");
-var { Conversa, ConversaParticipante, Mensagem, Utilizador, Colaborador } = require("../models");
+var { Conversa, ConversaParticipante, Mensagem, Utilizador, Colaborador, Chamada, ChamadaSinal } = require("../models");
 var { guardarFicheiro, responderComFicheiro } = require("../helpers/ficheiros");
 
 var MAX_TEXTO = 2000;
@@ -76,7 +76,8 @@ var naoLidasDe = async function (conversaId, utilizador) {
 };
 
 // Garante a participacao do utilizador (usado quando abre ou escreve no geral)
-// e marca a leitura ate agora.
+// e marca a leitura ate agora. Abrir a conversa tambem a torna visivel outra
+// vez (limpa a remocao feita por "Remover conversa").
 var marcarLido = async function (conversaId, utilizadorId) {
   var p = await ConversaParticipante.findOne({
     where: { conversa_id: conversaId, utilizador_id: utilizadorId },
@@ -90,6 +91,7 @@ var marcarLido = async function (conversaId, utilizadorId) {
     return p;
   }
   p.ultima_leitura = new Date();
+  p.eliminada_em = null;
   await p.save();
   return p;
 };
@@ -126,12 +128,22 @@ var listConversas = async function (req, res) {
       var item = {
         id: c.id,
         tipo: c.tipo,
-        titulo: c.tipo === "geral" ? (c.titulo || "Geral") : null,
+        titulo: c.tipo === "geral"
+          ? (c.titulo || "Geral")
+          : (c.tipo === "grupo" ? (c.titulo || "Grupo") : null),
         outro: null,
+        participantes: 0,
+        criador_id: c.tipo === "grupo" ? c.criador_id : null,
         ultima_mensagem: null,
         ultima_em: null,
         nao_lidas: 0,
       };
+
+      if (c.tipo === "grupo") {
+        var partes = await ConversaParticipante.findAll({ where: { conversa_id: c.id } });
+        item.participantes = partes.length;
+        item.membros_ids = partes.map(function (p) { return p.utilizador_id; });
+      }
 
       if (c.tipo === "direta") {
         var outroPart = await ConversaParticipante.findOne({
@@ -155,6 +167,12 @@ var listConversas = async function (req, res) {
         item.ultima_mensagem = previaMensagem(ultima);
         item.ultima_em = ultima.createdAt;
         item.ultimo_remetente = ultima.remetente ? ultima.remetente.nome_completo : null;
+      }
+
+      // Conversa removida por mim: fica de fora ate chegar mensagem nova.
+      if (participacao && participacao.eliminada_em &&
+          (!ultima || new Date(ultima.createdAt) <= new Date(participacao.eliminada_em))) {
+        continue;
       }
 
       item.nao_lidas = await naoLidasDe(c.id, req.utilizador);
@@ -317,7 +335,14 @@ var listMensagens = async function (req, res) {
 
     await marcarLido(conversa.id, req.utilizador.id);
 
-    var titulo = conversa.tipo === "geral" ? (conversa.titulo || "Geral") : null;    if (conversa.tipo === "direta") {
+    var titulo = conversa.tipo === "geral"
+      ? (conversa.titulo || "Geral")
+      : (conversa.tipo === "grupo" ? (conversa.titulo || "Grupo") : null);
+    var participantes = 0;
+    if (conversa.tipo === "grupo") {
+      participantes = await ConversaParticipante.count({ where: { conversa_id: conversa.id } });
+    }
+    if (conversa.tipo === "direta") {
       var outroPart = await ConversaParticipante.findOne({
         where: { conversa_id: conversa.id, utilizador_id: { [Op.ne]: req.utilizador.id } },
         include: [{ model: Utilizador, as: "utilizador", attributes: ["id", "nome_completo", "fotografia"] }],
@@ -329,7 +354,7 @@ var listMensagens = async function (req, res) {
 
     return res.status(200).json({
       dados: {
-        conversa: { id: conversa.id, tipo: conversa.tipo, titulo: titulo },
+        conversa: { id: conversa.id, tipo: conversa.tipo, titulo: titulo, participantes: participantes },
         mensagens: rows,
         total: count,
         a_escrever: nomesAEcrever(conversa.id, req.utilizador.id),
@@ -385,6 +410,7 @@ var enviarMensagem = async function (req, res) {
       if (meusIds.length > 0) {
         partAlvo = await ConversaParticipante.findOne({
           where: { conversa_id: { [Op.in]: meusIds }, utilizador_id: alvo.id },
+          include: [{ model: Conversa, as: "conversa", where: { tipo: "direta" }, attributes: ["id"] }],
         });
       }
       if (partAlvo) {
@@ -518,6 +544,7 @@ var abrirConversa = async function (req, res) {
     if (meusIds.length > 0) {
       partAlvo = await ConversaParticipante.findOne({
         where: { conversa_id: { [Op.in]: meusIds }, utilizador_id: alvo.id },
+        include: [{ model: Conversa, as: "conversa", where: { tipo: "direta" }, attributes: ["id"] }],
       });
     }
     var conversa = null;
@@ -537,6 +564,206 @@ var abrirConversa = async function (req, res) {
     });
   } catch (e) {
     console.log("Erro ao abrir conversa:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+// Cria um grupo com um titulo e varios participantes (o criador fica sempre
+// incluido). Body: { titulo, utilizador_ids: [ ... ] } com pelo menos uma
+// pessoa escolhida alem do proprio.
+var criarGrupo = async function (req, res) {
+  try {
+    var orgId = req.utilizador.organizacao_id;
+    var eu = req.utilizador.id;
+    var titulo = req.body && req.body.titulo ? String(req.body.titulo).trim() : "";
+    var membros = req.body && req.body.utilizador_ids ? req.body.utilizador_ids : [];
+
+    if (!Array.isArray(membros)) membros = [];
+    if (!titulo) {
+      return res.status(400).json({ error: "Indique o nome do grupo" });
+    }
+    if (titulo.length > 150) {
+      return res.status(400).json({ error: "Nome do grupo demasiado longo (maximo 150 caracteres)" });
+    }
+
+    // Remove repetidos e o proprio criador.
+    var vistos = {};
+    var limpos = [];
+    membros.forEach(function (id) {
+      if (!id) return;
+      var chave = String(id);
+      if (chave === String(eu) || vistos[chave]) return;
+      vistos[chave] = true;
+      limpos.push(chave);
+    });
+    if (limpos.length === 0) {
+      return res.status(400).json({ error: "Escolha pelo menos uma pessoa para o grupo" });
+    }
+    if (limpos.length > 100) {
+      return res.status(400).json({ error: "O grupo pode ter no maximo 100 pessoas" });
+    }
+
+    var encontrados = await Utilizador.findAll({
+      where: { id: { [Op.in]: limpos }, organizacao_id: orgId, activo: true },
+      attributes: ["id"],
+    });
+    if (encontrados.length !== limpos.length) {
+      return res.status(404).json({ error: "Ha participantes que nao foram encontrados" });
+    }
+
+    var conversa = await Conversa.create({ organizacao_id: orgId, tipo: "grupo", titulo: titulo, criador_id: eu });
+    await ConversaParticipante.create({ conversa_id: conversa.id, utilizador_id: eu, ultima_leitura: new Date() });
+    for (var i = 0; i < encontrados.length; i++) {
+      await ConversaParticipante.create({
+        conversa_id: conversa.id,
+        utilizador_id: encontrados[i].id,
+        ultima_leitura: null,
+      });
+    }
+
+    return res.status(201).json({
+      dados: {
+        id: conversa.id,
+        tipo: "grupo",
+        titulo: titulo,
+        participantes: encontrados.length + 1,
+      },
+    });
+  } catch (e) {
+    console.log("Erro ao criar grupo:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+// Adiciona membros a um grupo. Qualquer participante pode adicionar.
+// Body: { utilizador_ids: [ ... ] }
+var adicionarMembrosGrupo = async function (req, res) {
+  try {
+    var orgId = req.utilizador.organizacao_id;
+    var eu = req.utilizador.id;
+
+    var conversa = await Conversa.findOne({
+      where: { id: req.params.id, organizacao_id: orgId, tipo: "grupo" },
+    });
+    if (!conversa) {
+      return res.status(404).json({ error: "Grupo nao encontrado" });
+    }
+    var minha = await ConversaParticipante.findOne({
+      where: { conversa_id: conversa.id, utilizador_id: eu },
+    });
+    if (!minha) {
+      return res.status(403).json({ error: "Só os membros do grupo podem adicionar pessoas" });
+    }
+
+    var ids = req.body && req.body.utilizador_ids ? req.body.utilizador_ids : [];
+    if (!Array.isArray(ids)) ids = [];
+    var vistos = {};
+    var limpos = [];
+    ids.forEach(function (id) {
+      if (!id) return;
+      var chave = String(id);
+      if (chave === String(eu) || vistos[chave]) return;
+      vistos[chave] = true;
+      limpos.push(chave);
+    });
+    if (limpos.length === 0) {
+      return res.status(400).json({ error: "Escolha pelo menos uma pessoa" });
+    }
+
+    var jaMembros = await ConversaParticipante.findAll({ where: { conversa_id: conversa.id } });
+    var membrosIds = {};
+    jaMembros.forEach(function (p) { membrosIds[String(p.utilizador_id)] = true; });
+    var novos = limpos.filter(function (id) { return !membrosIds[id]; });
+
+    var encontrados = await Utilizador.findAll({
+      where: { id: { [Op.in]: novos.length > 0 ? novos : ["00000000-0000-0000-0000-000000000000"] }, organizacao_id: orgId, activo: true },
+      attributes: ["id"],
+    });
+    if (encontrados.length !== novos.length) {
+      return res.status(404).json({ error: "Ha participantes que nao foram encontrados" });
+    }
+
+    for (var i = 0; i < encontrados.length; i++) {
+      await ConversaParticipante.create({
+        conversa_id: conversa.id,
+        utilizador_id: encontrados[i].id,
+        ultima_leitura: null,
+      });
+    }
+
+    var total = await ConversaParticipante.count({ where: { conversa_id: conversa.id } });
+    return res.status(200).json({ dados: { id: conversa.id, participantes: total, adicionados: encontrados.length } });
+  } catch (e) {
+    console.log("Erro ao adicionar membros ao grupo:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+// Elimina o grupo para toda a gente (mensagens, participantes e chamadas).
+// So quem criou pode eliminar; nos grupos antigos (sem criador registado)
+// qualquer membro pode.
+var eliminarGrupo = async function (req, res) {
+  try {
+    var orgId = req.utilizador.organizacao_id;
+    var eu = req.utilizador.id;
+
+    var conversa = await Conversa.findOne({
+      where: { id: req.params.id, organizacao_id: orgId, tipo: "grupo" },
+    });
+    if (!conversa) {
+      return res.status(404).json({ error: "Grupo nao encontrado" });
+    }
+    var minha = await ConversaParticipante.findOne({
+      where: { conversa_id: conversa.id, utilizador_id: eu },
+    });
+    if (!minha) {
+      return res.status(403).json({ error: "Só os membros do grupo podem eliminá-lo" });
+    }
+    if (conversa.criador_id && String(conversa.criador_id) !== String(eu)) {
+      return res.status(403).json({ error: "S6 quem criou o grupo pode eliminá-lo" });
+    }
+
+    var chamadas = await Chamada.findAll({ where: { conversa_id: conversa.id } });
+    for (var i = 0; i < chamadas.length; i++) {
+      await ChamadaSinal.destroy({ where: { chamada_id: chamadas[i].id } });
+    }
+    await Chamada.destroy({ where: { conversa_id: conversa.id } });
+    await Mensagem.destroy({ where: { conversa_id: conversa.id } });
+    await ConversaParticipante.destroy({ where: { conversa_id: conversa.id } });
+    await conversa.destroy();
+
+    return res.status(200).json({ dados: { ok: true } });
+  } catch (e) {
+    console.log("Erro ao eliminar grupo:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+// Remove a conversa da lista do utilizador actual (todos os tipos). As
+// mensagens ficam; a conversa volta a aparecer quando chegar mensagem nova.
+var eliminarConversa = async function (req, res) {
+  try {
+    var carregada = await carregarConversa(req);
+    if (carregada.erro) return res.status(carregada.erro.status).json({ error: carregada.erro.mensagem });
+
+    var p = await ConversaParticipante.findOne({
+      where: { conversa_id: carregada.conversa.id, utilizador_id: req.utilizador.id },
+    });
+    if (!p) {
+      p = await ConversaParticipante.create({
+        conversa_id: carregada.conversa.id,
+        utilizador_id: req.utilizador.id,
+        ultima_leitura: new Date(),
+        eliminada_em: new Date(),
+      });
+    } else {
+      p.eliminada_em = new Date();
+      await p.save();
+    }
+
+    return res.status(200).json({ dados: { ok: true } });
+  } catch (e) {
+    console.log("Erro ao remover conversa:", e.message);
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
 };
@@ -564,4 +791,4 @@ var sinalizarEscrita = async function (req, res) {
   }
 };
 
-module.exports = { listConversas, naoLidas, listarUtilizadores, listMensagens, enviarMensagem, baixarAnexo, abrirConversa, sinalizarEscrita };
+module.exports = { listConversas, naoLidas, listarUtilizadores, listMensagens, enviarMensagem, baixarAnexo, abrirConversa, criarGrupo, adicionarMembrosGrupo, eliminarGrupo, eliminarConversa, sinalizarEscrita };

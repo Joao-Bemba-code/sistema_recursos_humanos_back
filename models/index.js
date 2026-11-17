@@ -29,6 +29,7 @@ var PedidoColaborador = require("./PedidoColaborador");
 var Ficheiro = require("./Ficheiro");
 var { Tarefa, TarefaEvento, TarefaAlocacao } = require("./Tarefa");
 var { Conversa, ConversaParticipante, Mensagem } = require("./Chat");
+var { Chamada, ChamadaSinal } = require("./Chamada");
 var LogAuditoria = require("./LogAuditoria");
 
 // Organizacao -> Utilizadores
@@ -287,6 +288,14 @@ ConversaParticipante.belongsTo(Utilizador, { foreignKey: "utilizador_id", as: "u
 Conversa.hasMany(Mensagem, { foreignKey: "conversa_id", as: "mensagens", constraints: false });
 Mensagem.belongsTo(Conversa, { foreignKey: "conversa_id", as: "conversa", constraints: false });
 Mensagem.belongsTo(Utilizador, { foreignKey: "utilizador_id", as: "remetente", constraints: false });
+
+// ==================== CONFERENCIA (CHAMADAS) ====================
+Conversa.hasMany(Chamada, { foreignKey: "conversa_id", as: "chamadas", constraints: false });
+Chamada.belongsTo(Conversa, { foreignKey: "conversa_id", as: "conversa", constraints: false });
+Chamada.belongsTo(Utilizador, { foreignKey: "iniciador_id", as: "iniciador", constraints: false });
+Chamada.hasMany(ChamadaSinal, { foreignKey: "chamada_id", as: "sinais", constraints: false });
+ChamadaSinal.belongsTo(Chamada, { foreignKey: "chamada_id", as: "chamada", constraints: false });
+ChamadaSinal.belongsTo(Utilizador, { foreignKey: "remetente_id", as: "remetente", constraints: false });
 
 // Departamento -> Departamento (hierarquia)
 Departamento.belongsTo(Departamento, { foreignKey: "departamento_pai_id", as: "pai" });
@@ -653,5 +662,7 @@ module.exports = {
   Conversa,
   ConversaParticipante,
   Mensagem,
+  Chamada,
+  ChamadaSinal,
   LogAuditoria,
 };

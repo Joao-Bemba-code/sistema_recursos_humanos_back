@@ -2,8 +2,9 @@ var { DataTypes } = require("sequelize");
 var { sequelize } = require("../config");
 
 // ==================== CHAT INTERNO ====================
-// Conversa geral (uma por organizacao) ou conversa directa entre dois
-// utilizadores. Sem FKs a nivel de BD para compatibilidade com TiDB.
+// Conversa geral (uma por organizacao), conversa directa entre dois
+// utilizadores ou grupo criado por um utilizador com varios participantes.
+// Sem FKs a nivel de BD para compatibilidade com TiDB.
 // Os colaboradores falam entre si e com os administradores; todos podem
 // escrever no canal geral.
 
@@ -18,14 +19,19 @@ var Conversa = sequelize.define("Conversa", {
     allowNull: false,
   },
   tipo: {
-    type: DataTypes.ENUM("geral", "direta"),
+    type: DataTypes.ENUM("geral", "direta", "grupo"),
     allowNull: false,
     defaultValue: "direta",
   },
   titulo: {
     type: DataTypes.STRING(150),
     allowNull: true,
-    comment: "Titulo visivel (usado no canal geral)",
+    comment: "Titulo visivel (canal geral e grupos)",
+  },
+  criador_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+    comment: "Quem criou o grupo (permite eliminar o grupo)",
   },
 }, {
   tableName: "conversas",
@@ -56,6 +62,11 @@ var ConversaParticipante = sequelize.define("ConversaParticipante", {
     type: DataTypes.DATE,
     allowNull: true,
     comment: "Momento ate ao qual o utilizador leu a conversa (null = nunca)",
+  },
+  eliminada_em: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    comment: "Quando o utilizador removeu a conversa para si (null = visivel)",
   },
 }, {
   tableName: "conversa_participantes",

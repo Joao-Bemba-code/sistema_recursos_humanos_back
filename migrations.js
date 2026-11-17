@@ -733,12 +733,13 @@ var migrations = async function () {
 
     // ==================== CHAT INTERNO ====================
     // Conversa geral (uma por organizacao) + conversas directas entre dois
-    // utilizadores. Sem FKs a nivel de BD para compatibilidade com TiDB.
+    // utilizadores + grupos criados pelos utilizadores. Sem FKs a nivel de
+    // BD para compatibilidade com TiDB.
     await sequelize.query(
       "CREATE TABLE IF NOT EXISTS `conversas` (" +
       "`id` CHAR(36) NOT NULL, " +
       "`organizacao_id` CHAR(36) NOT NULL, " +
-      "`tipo` ENUM('geral','direta') NOT NULL DEFAULT 'direta', " +
+      "`tipo` ENUM('geral','direta','grupo') NOT NULL DEFAULT 'direta', " +
       "`titulo` VARCHAR(150) NULL, " +
       "`createdAt` DATETIME NOT NULL, " +
       "`updatedAt` DATETIME NOT NULL, " +
@@ -747,6 +748,20 @@ var migrations = async function () {
       ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
     );
     console.log(" Tabela 'conversas' garantida!");
+
+    // BDs antigas: alargar o ENUM para aceitar grupos.
+    try {
+      await alterarColuna("conversas", "tipo", "ENUM('geral','direta','grupo') NOT NULL DEFAULT 'direta'");
+      console.log(" Coluna 'tipo' de conversas aceita grupos!");
+    } catch (eTipoConversa) {
+      console.log(" Aviso: nao foi possivel alargar o tipo de conversas:", eTipoConversa.message);
+    }
+
+    // Grupo: quem criou (para permitir eliminar) e remocao da conversa
+    // por cada participante (alguns so para si).
+    await adicionarColuna("conversas", "criador_id", "CHAR(36) NULL");
+    await adicionarColuna("conversa_participantes", "eliminada_em", "DATETIME NULL");
+    console.log(" Gestao de grupos e remocao de conversas garantida!");
 
     await sequelize.query(
       "CREATE TABLE IF NOT EXISTS `conversa_participantes` (" +
@@ -783,6 +798,50 @@ var migrations = async function () {
     await adicionarColuna("mensagens", "anexo_tipo", "VARCHAR(120) NULL");
     await adicionarColuna("mensagens", "anexo_tamanho", "INT NULL");
     console.log(" Colunas de anexo em 'mensagens' garantidas!");
+
+    // ==================== CONFERENCIA (CHAMADAS 1:1) ====================
+    // Chamadas de voz/video nas conversas directas; o servidor guarda o
+    // estado e os sinais WebRTC (o audio/video passa entre os navegadores).
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `chamadas` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`conversa_id` CHAR(36) NOT NULL, " +
+      "`organizacao_id` CHAR(36) NOT NULL, " +
+      "`iniciador_id` CHAR(36) NOT NULL, " +
+      "`tipo` ENUM('audio','video') NOT NULL DEFAULT 'audio', " +
+      "`estado` ENUM('a_tocar','aceite','terminada','recusada','sem_resposta') NOT NULL DEFAULT 'a_tocar', " +
+      "`terminada_por` CHAR(36) NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "KEY `chamadas_conversa_estado_idx` (`conversa_id`, `estado`), " +
+      "KEY `chamadas_org_idx` (`organizacao_id`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'chamadas' garantida!");
+
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `chamada_sinais` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`chamada_id` CHAR(36) NOT NULL, " +
+      "`remetente_id` CHAR(36) NOT NULL, " +
+      "`tipo` ENUM('offer','answer','ice') NOT NULL, " +
+      "`corpo` TEXT NOT NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "KEY `chamada_sinais_chamada_idx` (`chamada_id`, `createdAt`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'chamada_sinais' garantida!");
+
+    // Chamadas em grupo/geral: quem aceitou, quem saiu, quem recusou e o
+    // destinatario de cada sinal (cada par trata-se por si).
+    await adicionarColuna("chamadas", "aceites", "TEXT NULL");
+    await adicionarColuna("chamadas", "saiu", "TEXT NULL");
+    await adicionarColuna("chamadas", "recusados", "TEXT NULL");
+    await adicionarColuna("chamada_sinais", "destinatario_id", "CHAR(36) NULL");
+    console.log(" Colunas de chamada em grupo garantidas!");
 
     // ==================== DOCUMENTOS DO COLABORADOR ====================
     // Fotografia, CV, BI, certificado, contrato assinado e outros anexos.

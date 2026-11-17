@@ -151,6 +151,7 @@ app.use("/api/escalas", authenticate, escalaRoutes);
 app.use("/api/ficheiros", ficheiroRoutes);
 app.use("/api/tarefas", authenticate, tarefaRoutes);
 app.use("/api/chat", authenticate, chatRoutes);
+app.use("/api/chat/chamadas", authenticate, require("./routers/chamadas"));
 
 // Health check
 app.get("/health", function (req, res) {
