@@ -1,6 +1,7 @@
 var { Op, fn, col } = require("sequelize");
 var { PicagemBiometrico, Colaborador, RegistoPresenca, Feriado, EscalaSemanal } = require("../models");
 var { ORG_INEXISTENTE, incluirColaboradorDaOrg } = require("../helpers/organizacao");
+var { sincronizarPresenca, removerMovimentosDoRegisto } = require("../helpers/bancoHoras");
 
 // Horario de trabalho por omissao (configuravel por env): entrada 08:00, saida
 // 16:00. Serve de FALLBACK para colaboradores sem escala semanal propria (ver
@@ -506,7 +507,7 @@ var sincronizar = async function (req, res) {
       }
 
       if (!existente) {
-        await RegistoPresenca.create({
+        var novoRegisto = await RegistoPresenca.create({
           colaborador_id: grupo.colab.id,
           data: grupo.data,
           hora_entrada: entrada,
@@ -517,6 +518,7 @@ var sincronizar = async function (req, res) {
           metodo: "Biometrico",
           observacoes: observacaoAutomatica(entrada, !!saida, grupo.data, escalaGrupo),
         });
+        try { await sincronizarPresenca(novoRegisto); } catch (bancoErr) { console.log("Aviso banco horas:", bancoErr.message); }
         registosCriados++;
       } else {
         // Registo corrigido a mao pelo RH (metodo Manual ou ajustado_manual): o
@@ -550,6 +552,7 @@ var sincronizar = async function (req, res) {
           estado: novoEstado,
           observacoes: novaObs,
         });
+        try { await sincronizarPresenca(existente); } catch (bancoErr) { console.log("Aviso banco horas:", bancoErr.message); }
         registosActualizados++;
       }
 
@@ -928,6 +931,7 @@ var reclassificarAutomaticos = async function (desdeStr) {
       estado: novoEstado,
       observacoes: novaObs,
     });
+    try { await sincronizarPresenca(registo); } catch (bancoErr) { console.log("Aviso banco horas:", bancoErr.message); }
     actualizados++;
   }
 
@@ -948,6 +952,7 @@ var reclassificarAutomaticos = async function (desdeStr) {
     var dataReg = dataLocal(reg.data);
     if (datasFeriadoTodos[dataReg]) {
       await reg.destroy();
+      try { await removerMovimentosDoRegisto(reg.id, reg.colaborador_id); } catch (bancoErr) { console.log("Aviso banco horas:", bancoErr.message); }
       removidos++;
       continue;
     }
@@ -959,12 +964,14 @@ var reclassificarAutomaticos = async function (desdeStr) {
       var primeiraReg = primeiraDeReclass[chaveBio(colabReg2.id_biometrico)];
       if (primeiraReg && dataReg < primeiraReg && IDS_DESDE_PRIMEIRA_PICAGEM.indexOf(chaveBio(colabReg2.id_biometrico)) !== -1) {
         await reg.destroy();
+        try { await removerMovimentosDoRegisto(reg.id, reg.colaborador_id); } catch (bancoErr) { console.log("Aviso banco horas:", bancoErr.message); }
         removidos++;
         continue;
       }
       var diaSemanaReg2 = new Date(dataReg + "T00:00:00").getDay();
       if (!escalaDoDia(colabReg2, mapaEscalas, diaSemanaReg2)) {
         await reg.destroy();
+        try { await removerMovimentosDoRegisto(reg.id, reg.colaborador_id); } catch (bancoErr) { console.log("Aviso banco horas:", bancoErr.message); }
         removidos++;
       }
     }

@@ -11,3 +11,5 @@ srv.log
 srv*.log
 srv*.err.log
 server*.log
+backend-restart.log
+uploads/

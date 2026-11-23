@@ -113,6 +113,7 @@ exports.resumoPagamentos = async function (req, res) {
       irt: 0,
       ss: 0,
       descontoFaltas: 0,
+      descontoBancoHoras: 0,
       descontos: 0,
       liquido: 0,
       pendente: 0,
@@ -127,6 +128,7 @@ exports.resumoPagamentos = async function (req, res) {
       totais.irt += toNum(p.irt);
       totais.ss += toNum(p.seguranca_social);
       totais.descontoFaltas += toNum(p.desconto_faltas);
+      totais.descontoBancoHoras += toNum(p.desconto_banco_horas);
       totais.descontos += toNum(p.descontos);
       totais.liquido += toNum(p.total_liquido);
       if (p.estado === "Pendente") totais.pendente++;
@@ -170,7 +172,7 @@ exports.resumoPagamentos = async function (req, res) {
       { width: 11 },  // Estado
     ];
 
-    var LAST_COL = 12;
+    var LAST_COL = 13;
     var r = 1;
 
     function fullRange(row) {
@@ -238,7 +240,7 @@ exports.resumoPagamentos = async function (req, res) {
     // Detalhe por colaborador (mesmas colunas do PDF)
     mergeFull(r++, "DETALHE POR COLABORADOR", { bold: true, size: 11 }, { horizontal: "left", vertical: "middle" });
 
-    var headers = ["N.", "Colaborador", "IBAN", "Salario Base", "Subsidios", "Extras", "IRT", "INSS", "Descontos", "Faltas", "Liquido", "Estado"];
+    var headers = ["N.", "Colaborador", "IBAN", "Salario Base", "Subsidios", "Extras", "IRT", "INSS", "Descontos", "Faltas", "Banco Horas", "Liquido", "Estado"];
     headers.forEach(function (h, idx) {
       var cell = ws.getCell(r, idx + 1);
       cell.value = h;
@@ -260,6 +262,7 @@ exports.resumoPagamentos = async function (req, res) {
         toNum(p.seguranca_social),
         toNum(p.descontos),
         toNum(p.desconto_faltas),
+        toNum(p.desconto_banco_horas),
         toNum(p.total_liquido),
         p.estado || "",
       ];
@@ -267,7 +270,7 @@ exports.resumoPagamentos = async function (req, res) {
         var cell = ws.getCell(r, c + 1);
         cell.value = v;
         applyBodyStyle(cell);
-        if (c >= 3 && c <= 10) setMoney(cell);
+        if (c >= 3 && c <= 11) setMoney(cell);
       });
       r += 1;
     });
@@ -281,13 +284,14 @@ exports.resumoPagamentos = async function (req, res) {
     ws.getCell(r, 8).value = totais.ss;
     ws.getCell(r, 9).value = totais.descontos;
     ws.getCell(r, 10).value = totais.descontoFaltas;
-    ws.getCell(r, 11).value = totais.liquido;
+    ws.getCell(r, 11).value = totais.descontoBancoHoras;
+    ws.getCell(r, 12).value = totais.liquido;
     for (var tc = 1; tc <= LAST_COL; tc++) {
       var tcell = ws.getCell(r, tc);
       applyBodyStyle(tcell);
       tcell.font = { bold: true, size: 10 };
       tcell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEEF2F7" } };
-      if (tc >= 4 && tc <= 11) setMoney(tcell);
+      if (tc >= 4 && tc <= 12) setMoney(tcell);
     }
     ws.getCell(r, 2).alignment = { vertical: "middle", horizontal: "right" };
     r += 2;
@@ -408,7 +412,7 @@ exports.folhaSalarial = async function (req, res) {
     linha("Total Vencimentos", totalVencimentos, { money: true, bold: true });
     y += 1;
 
-    var totalDescontos = toNum(pagamento.irt) + toNum(pagamento.seguranca_social) + toNum(pagamento.descontos) + toNum(pagamento.desconto_faltas);
+    var totalDescontos = toNum(pagamento.irt) + toNum(pagamento.seguranca_social) + toNum(pagamento.descontos) + toNum(pagamento.desconto_faltas) + toNum(pagamento.desconto_banco_horas);
     ws.getCell("A" + y).value = "DESCONTOS";
     ws.getCell("A" + y).font = { bold: true, size: 10 };
     y += 1;
@@ -416,6 +420,7 @@ exports.folhaSalarial = async function (req, res) {
     if (toNum(pagamento.seguranca_social) > 0) linha("  INSS", -toNum(pagamento.seguranca_social), { money: true });
     if (toNum(pagamento.descontos) > 0) linha("  Outros Descontos", -toNum(pagamento.descontos), { money: true });
     if (toNum(pagamento.desconto_faltas) > 0) linha("  Desconto Faltas", -toNum(pagamento.desconto_faltas), { money: true });
+    if (toNum(pagamento.desconto_banco_horas) > 0) linha("  Desconto Banco de Horas", -toNum(pagamento.desconto_banco_horas), { money: true });
     linha("Total Descontos", -totalDescontos, { money: true, bold: true });
     y += 1;
 

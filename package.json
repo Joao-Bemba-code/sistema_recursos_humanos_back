@@ -4,9 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test tests/*.test.js",
     "start": "node index.js",
     "migrate": "node migrations.js",
+    "diagnostico": "node scripts/diagnostico.js",
     "super-admin": "node scripts/criar-super-admin.js"
   },
   "keywords": [],

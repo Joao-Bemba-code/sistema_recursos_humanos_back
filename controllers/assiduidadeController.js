@@ -1,6 +1,7 @@
 var { Op } = require("sequelize");
 var { RegistoPresenca, Colaborador } = require("../models");
 var { orgDaSessao, incluirColaboradorDaOrg, colaboradorNaOrg } = require("../helpers/organizacao");
+var { sincronizarPresenca, removerMovimentosDoRegisto } = require("../helpers/bancoHoras");
 
 // Valores aceitos pela coluna ENUM no MySQL (sem acentos).
 var ESTADOS_VALIDOS = ["Presente", "Ausente", "Atrasado", "Licenca", "Ferias", "Fim_semana", "Em_Curso"];
@@ -186,6 +187,14 @@ var create = async function (req, res) {
 
     var registo = await RegistoPresenca.create(dados);
 
+    // Banco de horas: saida antes da hora prevista gera divida; horas a mais
+    // geram credito. Nunca impede o registo de presenca se falhar.
+    try {
+      await sincronizarPresenca(registo);
+    } catch (bancoErr) {
+      console.log("Aviso: banco de horas (create):", bancoErr.message);
+    }
+
     return res.status(201).json({
       mensagem: "Registo de presenca criado com sucesso",
       dados: registo,
@@ -248,6 +257,12 @@ var update = async function (req, res) {
       include: [incluirColaboradorDaOrg(orgDaSessao(req))],
     });
 
+    try {
+      await sincronizarPresenca(actualizado);
+    } catch (bancoErr) {
+      console.log("Aviso: banco de horas (update):", bancoErr.message);
+    }
+
     return res.status(200).json({
       mensagem: "Registo de presenca actualizado com sucesso",
       dados: actualizado,
@@ -269,6 +284,12 @@ var remove = async function (req, res) {
     }
 
     await registo.destroy();
+
+    try {
+      await removerMovimentosDoRegisto(registo.id, registo.colaborador_id);
+    } catch (bancoErr) {
+      console.log("Aviso: banco de horas (remove):", bancoErr.message);
+    }
 
     return res.status(200).json({ mensagem: "Registo de presenca eliminado com sucesso" });
   } catch (e) {

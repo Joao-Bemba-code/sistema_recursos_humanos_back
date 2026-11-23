@@ -1,6 +1,7 @@
 var { Op } = require("sequelize");
 var { sequelize, Vencimento, Pagamento, Colaborador, RegistoPresenca, Credito, CreditoMovimento } = require("../models");
 var { calcularDescontosCreditos, registarDescontosCreditos } = require("./creditoController");
+var { calcularDesconto: calcularDescontoBancoHoras, marcarDescontado: marcarBancoHorasDescontado } = require("../helpers/bancoHoras");
 var { ORG_INEXISTENTE, incluirColaboradorDaOrg, colaboradorNaOrg } = require("../helpers/organizacao");
 
 // ==================== IMPOSTOS ANGOLA (IRT 2026 / INSS) ====================
@@ -575,7 +576,12 @@ var createPagamento = async function (req, res) {
     var descontoFaltas = await calcularDescontoFaltas(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano), null, apenasMes);
     dados.desconto_faltas = descontoFaltas.total;
 
-    var maxDesconto = Math.max(0, Math.round((dados.salario_base + dados.subsidios + dados.horas_extras - dados.irt - dados.seguranca_social - descontoFaltas.total) * 100) / 100);
+    // Banco de horas: dividas nao compensadas nem justificadas sao descontadas
+    // no fecho do mes, pelo valor/hora salario_base / 30 / 8.
+    var descontoBanco = await calcularDescontoBancoHoras(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano), apenasMes, null, dados.salario_base);
+    dados.desconto_banco_horas = descontoBanco.total;
+
+    var maxDesconto = Math.max(0, Math.round((dados.salario_base + dados.subsidios + dados.horas_extras - dados.irt - dados.seguranca_social - descontoFaltas.total - descontoBanco.total) * 100) / 100);
 
     var t = await sequelize.transaction();
     try {
@@ -587,7 +593,7 @@ var createPagamento = async function (req, res) {
         descontoCreditos = creditos.total;
       }
 
-      dados.total_liquido = Math.round((dados.salario_base + dados.subsidios + dados.horas_extras - dados.descontos - dados.irt - dados.seguranca_social - descontoFaltas.total) * 100) / 100;
+      dados.total_liquido = Math.round((dados.salario_base + dados.subsidios + dados.horas_extras - dados.descontos - dados.irt - dados.seguranca_social - descontoFaltas.total - descontoBanco.total) * 100) / 100;
 
       var pagamento = await Pagamento.create(dados, { transaction: t });
 
@@ -597,6 +603,8 @@ var createPagamento = async function (req, res) {
 
       // Marca as faltas descontadas como processadas (desaparecem dos descontos pendentes)
       await marcarFaltasProcessadas(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano), t, apenasMes);
+      // Marca as dividas do banco de horas que foram descontadas
+      await marcarBancoHorasDescontado(dados.colaborador_id, parseInt(dados.mes), parseInt(dados.ano), pagamento.id, apenasMes, t, dados.salario_base);
 
       await t.commit();
 
@@ -654,11 +662,15 @@ var updatePagamento = async function (req, res) {
     var descontoFaltas = await calcularDescontoFaltas(colId, mesAtual, anoAtual, pagamento.id);
     dadosActualizar.desconto_faltas = descontoFaltas.total;
 
-    dadosActualizar.total_liquido = Math.round((sb + sub + he - desc - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas.total) * 100) / 100;
+    var descontoBanco = await calcularDescontoBancoHoras(colId, mesAtual, anoAtual, false, pagamento.id, sb);
+    dadosActualizar.desconto_banco_horas = descontoBanco.total;
+
+    dadosActualizar.total_liquido = Math.round((sb + sub + he - desc - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas.total - descontoBanco.total) * 100) / 100;
 
     await pagamento.update(dadosActualizar);
 
     await marcarFaltasProcessadas(colId, mesAtual, anoAtual);
+    await marcarBancoHorasDescontado(colId, mesAtual, anoAtual, pagamento.id, false, undefined, sb);
 
     var actualizado = await Pagamento.findByPk(req.params.id, {
       include: [
@@ -687,6 +699,7 @@ var recalcularFaltas = async function (req, res) {
     }
 
     var descontoFaltas = await calcularDescontoFaltas(pagamento.colaborador_id, pagamento.mes, pagamento.ano, pagamento.id);
+    var descontoBanco = await calcularDescontoBancoHoras(pagamento.colaborador_id, pagamento.mes, pagamento.ano, false, pagamento.id, pagamento.salario_base);
 
     var sb = parseFloat(pagamento.salario_base) || 0;
     var sub = parseFloat(pagamento.subsidios) || 0;
@@ -694,14 +707,16 @@ var recalcularFaltas = async function (req, res) {
     var desc = parseFloat(pagamento.descontos) || 0;
     var irt = parseFloat(pagamento.irt) || 0;
     var ss = parseFloat(pagamento.seguranca_social) || 0;
-    var totalLiquido = Math.round((sb + sub + he - desc - irt - ss - descontoFaltas.total) * 100) / 100;
+    var totalLiquido = Math.round((sb + sub + he - desc - irt - ss - descontoFaltas.total - descontoBanco.total) * 100) / 100;
 
     await pagamento.update({
       desconto_faltas: descontoFaltas.total,
+      desconto_banco_horas: descontoBanco.total,
       total_liquido: totalLiquido,
     });
 
     await marcarFaltasProcessadas(pagamento.colaborador_id, pagamento.mes, pagamento.ano);
+    await marcarBancoHorasDescontado(pagamento.colaborador_id, pagamento.mes, pagamento.ano, pagamento.id, false, undefined, pagamento.salario_base);
 
     var actualizado = await Pagamento.findByPk(req.params.id, {
       include: [
@@ -883,11 +898,12 @@ var gerarPagamentosAutomaticos = async function (req, res) {
 
       var obrigatorios = calcularDescontosObrigatorios(salarioBase, subsidios, horasExtras, await temSegurancaSocial(colab.id));
       var descontoFaltas = await calcularDescontoFaltas(colab.id, parseInt(mes), parseInt(ano));
+      var descontoBanco = await calcularDescontoBancoHoras(colab.id, parseInt(mes), parseInt(ano), false, null, salarioBase);
 
       // Desconto automatico de creditos activos (limitado para o liquido nao ficar negativo)
-      var maxDesconto = Math.max(0, Math.round((salarioBase + subsidios + horasExtras - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas.total) * 100) / 100);
+      var maxDesconto = Math.max(0, Math.round((salarioBase + subsidios + horasExtras - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas.total - descontoBanco.total) * 100) / 100);
       var creditos = await calcularDescontosCreditos(colab.id, parseInt(mes), parseInt(ano), maxDesconto, { transaction: t });
-      var totalLiquido = Math.round((salarioBase + subsidios + horasExtras - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas.total - creditos.total) * 100) / 100;
+      var totalLiquido = Math.round((salarioBase + subsidios + horasExtras - obrigatorios.irt - obrigatorios.seguranca_social - descontoFaltas.total - descontoBanco.total - creditos.total) * 100) / 100;
 
       var pagamentoDados = {
         colaborador_id: colab.id,
@@ -900,6 +916,7 @@ var gerarPagamentosAutomaticos = async function (req, res) {
         irt: obrigatorios.irt,
         seguranca_social: obrigatorios.seguranca_social,
         desconto_faltas: descontoFaltas.total,
+        desconto_banco_horas: descontoBanco.total,
         total_liquido: totalLiquido,
         estado: estadoPagamento,
         data_pagamento: dataPagamento,
@@ -915,8 +932,9 @@ var gerarPagamentosAutomaticos = async function (req, res) {
 
         // Marca as faltas descontadas como processadas (desaparecem dos descontos pendentes)
         await marcarFaltasProcessadas(colab.id, parseInt(mes), parseInt(ano), t);
+        await marcarBancoHorasDescontado(colab.id, parseInt(mes), parseInt(ano), pagamento.id, false, t, salarioBase);
 
-        criados.push({ colaborador_id: colab.id, total_liquido: totalLiquido, desconto_creditos: creditos.total, id: pagamento.id });
+        criados.push({ colaborador_id: colab.id, total_liquido: totalLiquido, desconto_creditos: creditos.total, desconto_banco_horas: descontoBanco.total, id: pagamento.id });
       } catch (erroInterno) {
         var campos = (erroInterno.fields && Object.keys(erroInterno.fields)) || [];
         var conflitoPagamento = erroInterno.name === "SequelizeUniqueConstraintError" && campos.indexOf("credito_id") === -1;

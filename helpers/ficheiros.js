@@ -80,7 +80,10 @@ function nomePublicId(nome) {
 }
 
 // Envia o conteudo para o Cloudinary. Comprime imagens (q_auto) no envio.
-function enviarParaCloudinary(buffer, opcoes) {
+// `timeout` e explicito porque o valor por omissao do SDK pode ser demasiado
+// curto em ambientes alojados; em caso de timeout faz-se uma segunda tentativa.
+function enviarParaCloudinary(buffer, opcoes, tentativa) {
+  var tentativaAtual = tentativa || 1;
   return new Promise(function (resolve, reject) {
     var opcoesUpload = {
       folder: "sghr/" + opcoes.pasta,
@@ -89,6 +92,7 @@ function enviarParaCloudinary(buffer, opcoes) {
       overwrite: false,
       unique_filename: true,
       use_filename: false,
+      timeout: 120000,
     };
     if (opcoes.imagem) {
       // A API so aceita transformation como objecto/array - uma string como
@@ -97,7 +101,15 @@ function enviarParaCloudinary(buffer, opcoes) {
     }
 
     var stream = cloudinary.uploader.upload_stream(opcoesUpload, function (err, result) {
-      if (err) return reject(err);
+      if (err) {
+        var mensagem = String((err && err.message) || "");
+        var transitorio = /timeout|econn|socket|network/i.test(mensagem);
+        if (transitorio && tentativaAtual < 2) {
+          console.log(" Upload ao Cloudinary falhou (" + mensagem + "); a tentar novamente.");
+          return enviarParaCloudinary(buffer, opcoes, tentativaAtual + 1).then(resolve, reject);
+        }
+        return reject(err);
+      }
       resolve({ url: result.secure_url, public_id: result.public_id });
     });
     stream.end(buffer);

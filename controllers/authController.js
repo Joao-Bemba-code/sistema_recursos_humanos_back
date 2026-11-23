@@ -4,6 +4,53 @@ var { prepararUtilizador, fundirPermissoes, normalizarPermissoesSistema } = requ
 
 var SENHA_PADRAO = "colaborador123";
 
+// O login precisa de perfil, perfis extra e organizacao. Em bases migradas ou
+// restauradas pode faltar alguma dessas tabelas/relacoes; nesse caso a consulta
+// completa falharia com 500. Tentamos primeiro o conjunto completo e, se a
+// falha for apenas de esquema (tabela/coluna inexistente), repetimos com menos
+// includes ate conseguir carregar o utilizador.
+var includesLogin = [
+  { model: Perfil, as: "perfil" },
+  { model: Perfil, as: "perfis_extra" },
+  { model: Organizacao, as: "organizacao" },
+];
+
+var ehErroDeLigacao = function (mensagem) {
+  return /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|EAI_AGAIN|Unknown database|Access denied|SSL|handshake|connect|login failed/i.test(mensagem);
+};
+
+var encontrarUtilizadorLogin = async function (where) {
+  var variantes = [
+    includesLogin,
+    [{ model: Perfil, as: "perfil" }, { model: Organizacao, as: "organizacao" }],
+    [{ model: Perfil, as: "perfil" }],
+    [],
+  ];
+
+  var ultimoErro = null;
+  for (var i = 0; i < variantes.length; i++) {
+    try {
+      return await Utilizador.findOne({ where: where, include: variantes[i] });
+    } catch (e) {
+      ultimoErro = e;
+      var msg = String(e.message || e);
+      console.log(" Aviso: consulta de login (variante " + i + ") falhou: " + msg);
+      // Falha de ligacao/credenciais da BD: nao adianta repetir com outros includes.
+      if (ehErroDeLigacao(msg)) break;
+    }
+  }
+  throw ultimoErro || new Error("Não foi possível consultar a base de dados");
+};
+
+var atualizarDadosLogin = async function (utilizador, dados) {
+  try {
+    await utilizador.update(dados);
+  } catch (e) {
+    // Estatisticas de login nao podem impedir um login valido.
+    console.log(" Aviso: não foi possível actualizar dados de login:", e.message);
+  }
+};
+
 var generateToken = function (utilizador) {
   return jwt.sign(
     {
@@ -89,14 +136,7 @@ var login = async function (req, res) {
 
     var where = email ? { email: email.toLowerCase() } : { username: username.toLowerCase() };
 
-    var utilizador = await Utilizador.findOne({
-      where: where,
-      include: [
-        { model: Perfil, as: "perfil" },
-        { model: Perfil, as: "perfis_extra" },
-        { model: Organizacao, as: "organizacao" },
-      ],
-    });
+    var utilizador = await encontrarUtilizadorLogin(where);
 
     // Auto-criar conta para colaborador que ja existe na BD mas nao tem login
     if (!utilizador && email) {
@@ -134,13 +174,7 @@ var login = async function (req, res) {
 
         await colaborador.update({ utilizador_id: utilizador.id }).catch(function () {});
 
-        utilizador = await Utilizador.findByPk(utilizador.id, {
-          include: [
-            { model: Perfil, as: "perfil" },
-            { model: Perfil, as: "perfis_extra" },
-            { model: Organizacao, as: "organizacao" },
-          ],
-        });
+        utilizador = await encontrarUtilizadorLogin({ id: utilizador.id });
 
         console.log(" Conta criada automaticamente para: " + email);
       }
@@ -169,7 +203,7 @@ var login = async function (req, res) {
       if (tentativas >= 5) {
         updateData.bloqueado = true;
       }
-      await utilizador.update(updateData);
+      await atualizarDadosLogin(utilizador, updateData);
 
       var msgExtra = tentativas >= 5
         ? " Conta bloqueada por segurança."
@@ -186,7 +220,7 @@ var login = async function (req, res) {
       });
     }
 
-    await utilizador.update({ ultimo_login: new Date(), tentativas_login: 0, bloqueado: false });
+    await atualizarDadosLogin(utilizador, { ultimo_login: new Date(), tentativas_login: 0, bloqueado: false });
 
     var token = generateToken(utilizador);
     var refreshToken = generateRefreshToken(utilizador);
@@ -198,8 +232,11 @@ var login = async function (req, res) {
       utilizador: await serializarUtilizador(utilizador),
     });
   } catch (e) {
-    console.log("Erro no login:", e.message);
-    return res.status(500).json({ error: "Erro interno do servidor" });
+    console.log("Erro no login:", e.stack || e);
+    return res.status(500).json({
+      error: "Erro interno do servidor",
+      detalhes: process.env.DEBUG_ERRORS === "true" ? String(e.message || e) : undefined,
+    });
   }
 };
 
@@ -256,13 +293,7 @@ var register = async function (req, res) {
       must_change_password: true,
     });
 
-    var completo = await Utilizador.findByPk(novoUtilizador.id, {
-      include: [
-        { model: Perfil, as: "perfil" },
-        { model: Perfil, as: "perfis_extra" },
-        { model: Organizacao, as: "organizacao" },
-      ],
-    });
+    var completo = await encontrarUtilizadorLogin({ id: novoUtilizador.id });
 
     var token = generateToken(completo);
 
@@ -283,6 +314,7 @@ var getProfile = async function (req, res) {
       utilizador: await serializarUtilizador(req.utilizador),
     });
   } catch (e) {
+    console.log("Erro no perfil:", e.stack || e);
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
 };
@@ -334,14 +366,7 @@ var loginPlataforma = async function (req, res) {
       ? { email: String(email).toLowerCase() }
       : { username: String(username).toLowerCase() };
 
-    var utilizador = await Utilizador.findOne({
-      where: where,
-      include: [
-        { model: Perfil, as: "perfil" },
-        { model: Perfil, as: "perfis_extra" },
-        { model: Organizacao, as: "organizacao" },
-      ],
-    });
+    var utilizador = await encontrarUtilizadorLogin(where);
 
     if (!utilizador || !utilizador.super_admin) {
       return res.status(401).json({ error: "Credenciais inválidas" });
@@ -360,7 +385,7 @@ var loginPlataforma = async function (req, res) {
       var tentativas = (utilizador.tentativas_login || 0) + 1;
       var updateData = { tentativas_login: tentativas };
       if (tentativas >= 5) updateData.bloqueado = true;
-      await utilizador.update(updateData);
+      await atualizarDadosLogin(utilizador, updateData);
 
       var msgExtra = tentativas >= 5
         ? " Conta bloqueada por segurança."
@@ -368,7 +393,7 @@ var loginPlataforma = async function (req, res) {
       return res.status(401).json({ error: "Credenciais inválidas." + msgExtra });
     }
 
-    await utilizador.update({ ultimo_login: new Date(), tentativas_login: 0, bloqueado: false });
+    await atualizarDadosLogin(utilizador, { ultimo_login: new Date(), tentativas_login: 0, bloqueado: false });
 
     return res.status(200).json({
       mensagem: "Sessão da plataforma iniciada",
@@ -377,8 +402,11 @@ var loginPlataforma = async function (req, res) {
       utilizador: await serializarUtilizador(utilizador),
     });
   } catch (e) {
-    console.log("Erro no login da plataforma:", e.message);
-    return res.status(500).json({ error: "Erro interno do servidor" });
+    console.log("Erro no login da plataforma:", e.stack || e);
+    return res.status(500).json({
+      error: "Erro interno do servidor",
+      detalhes: process.env.DEBUG_ERRORS === "true" ? String(e.message || e) : undefined,
+    });
   }
 };
 

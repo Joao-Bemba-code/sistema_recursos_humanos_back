@@ -29,6 +29,7 @@ var contratoRoutes = require("./routers/contratos");
 var uploadRoutes = require("./routers/upload");
 var feriasRoutes = require("./routers/ferias");
 var assiduidadeRoutes = require("./routers/assiduidade");
+var bancoHorasRoutes = require("./routers/bancoHoras");
 var formacaoRoutes = require("./routers/formacao");
 var avaliacaoRoutes = require("./routers/avaliacao");
 var folhaSalarialRoutes = require("./routers/folhaSalarial");
@@ -132,6 +133,7 @@ app.use("/api/contratos", authenticate, contratoRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/ferias", authenticate, feriasRoutes);
 app.use("/api/assiduidade", authenticate, assiduidadeRoutes);
+app.use("/api/banco-horas", authenticate, bancoHorasRoutes);
 app.use("/api/formacao", authenticate, formacaoRoutes);
 app.use("/api/avaliacao", authenticate, avaliacaoRoutes);
 app.use("/api/folha-salarial", authenticate, folhaSalarialRoutes);
@@ -159,6 +161,59 @@ app.get("/health", function (req, res) {
     status: "ok",
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
+  });
+});
+
+// Diagnostico da base de dados (sem credenciais). Serve para confirmar no
+// deploy que a API está ligada à BD certa e que as tabelas do login existem.
+app.get("/health/db", async function (req, res) {
+  var hostBd = process.env.Host_database || process.env.HOST_DATABASE || process.env.DB_HOST || "";
+  var configuracao = {
+    host: hostBd || null,
+    port: process.env.Port_database || process.env.PORT_DATABASE || process.env.DB_PORT || null,
+    database: process.env.Name_database || process.env.NAME_DATABASE || process.env.DB_NAME || null,
+    dialect: process.env.Lang_database || process.env.LANG_DATABASE || process.env.DB_DIALECT || "mysql",
+    ssl: String(process.env.SSL_database || process.env.SSL_DATABASE || process.env.DB_SSL || "").toLowerCase() === "true" ||
+      /tidbcloud\.com/i.test(hostBd),
+  };
+
+  try {
+    await sequelize.authenticate();
+  } catch (e) {
+    return res.status(503).json({
+      ligacao: "erro",
+      erro: e.message,
+      configuracao: configuracao,
+    });
+  }
+
+  var tabelas = {};
+  var esperadas = ["utilizadores", "perfis", "organizacoes", "utilizadores_perfis", "colaboradores"];
+  for (var i = 0; i < esperadas.length; i++) {
+    var tabela = esperadas[i];
+    try {
+      var resultado = await sequelize.query("SHOW TABLES LIKE '" + tabela + "'");
+      var linhas = Array.isArray(resultado[0]) ? resultado[0] : resultado;
+      tabelas[tabela] = linhas.length > 0;
+    } catch (eTabela) {
+      tabelas[tabela] = "erro: " + eTabela.message;
+    }
+  }
+
+  var colunasUtilizadores = [];
+  try {
+    var resColunas = await sequelize.query("SHOW COLUMNS FROM `utilizadores`");
+    var linhasColunas = Array.isArray(resColunas[0]) ? resColunas[0] : resColunas;
+    colunasUtilizadores = linhasColunas.map(function (c) { return c.Field; });
+  } catch (eColunas) {
+    colunasUtilizadores = ["erro: " + eColunas.message];
+  }
+
+  return res.status(200).json({
+    ligacao: "ok",
+    configuracao: configuracao,
+    tabelas: tabelas,
+    colunas_utilizadores: colunasUtilizadores,
   });
 });
 

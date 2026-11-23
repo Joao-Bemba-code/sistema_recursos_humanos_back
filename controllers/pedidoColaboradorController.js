@@ -1,6 +1,7 @@
 var { Op } = require("sequelize");
 var { PedidoColaborador, Colaborador, Utilizador, Perfil, Notificacao, RegistoPresenca } = require("../models");
 var notificacaoController = require("./notificacaoController");
+var { justificarDispensa } = require("../helpers/bancoHoras");
 var { guardarFicheiro, urlDoFicheiro, apagarFicheiroDeUrl, responderComFicheiro } = require("../helpers/ficheiros");
 
 var list = async function (req, res) {
@@ -291,6 +292,19 @@ var updateEstado = async function (req, res) {
         }
       } catch (justErr) {
         console.log("Erro ao justificar falta via pedido:", justErr.message);
+      }
+    }
+
+    // Dispensa aprovada: as horas em falta do periodo ficam justificadas
+    // automaticamente no banco (nao geram divida nem desconto).
+    if (novoEstado === "aprovado" && pedido.tipo === "dispensa") {
+      try {
+        var justificadas = await justificarDispensa(pedido);
+        if (justificadas > 0) {
+          console.log("Banco de horas: " + justificadas + " movimento(s) justificado(s) por dispensa");
+        }
+      } catch (bancoErr) {
+        console.log("Erro ao justificar banco de horas via pedido:", bancoErr.message);
       }
     }
 

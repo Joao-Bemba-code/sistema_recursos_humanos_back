@@ -13,6 +13,7 @@ var { Unidade, UnidadeSeccao } = require("./Unidade");
 var Contrato = require("./Contrato");
 var { Ferias, SolicitacaoFerias, Licenca } = require("./FeriasLicencas");
 var { RegistoPresenca, Turno } = require("./Assiduidade");
+var { BancoHoraMovimento } = require("./BancoHora");
 var { CicloAvaliacao, AvaliacaoDesempenho } = require("./Avaliacao");
 var { CursoFormacao, InscricaoFormacao } = require("./Formacao");
 var OcorrenciaDisciplinar = require("./Disciplinar");
@@ -169,6 +170,14 @@ InscricaoFormacao.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "co
 CursoFormacao.hasMany(InscricaoFormacao, { foreignKey: "curso_id", as: "inscricoes" });
 InscricaoFormacao.belongsTo(CursoFormacao, { foreignKey: "curso_id", as: "curso" });
 
+// Certificado da inscricao (ficheiro PDF/PNG/JPG carregado pelo RH).
+// Sem FK a nivel de BD para compatibilidade com TiDB.
+InscricaoFormacao.belongsTo(Ficheiro, {
+  foreignKey: "certificado_ficheiro_id",
+  as: "ficheiro_certificado",
+  constraints: false,
+});
+
 // Colaborador -> OcorrenciasDisciplinares
 Colaborador.hasMany(OcorrenciaDisciplinar, { foreignKey: "colaborador_id", as: "ocorrencias" });
 OcorrenciaDisciplinar.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador" });
@@ -212,6 +221,12 @@ Colaborador.hasMany(PicagemBiometrico, { foreignKey: "colaborador_id", as: "pica
 // Colaborador -> Escala semanal (sem FK a nivel de BD, compatibilidade TiDB)
 Colaborador.hasMany(EscalaSemanal, { foreignKey: "colaborador_id", as: "escalas_semanais", constraints: false });
 EscalaSemanal.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador", constraints: false });
+
+// Banco de horas (sem FK a nivel de BD para compatibilidade com TiDB)
+Colaborador.hasMany(BancoHoraMovimento, { foreignKey: "colaborador_id", as: "banco_horas_movimentos", constraints: false });
+BancoHoraMovimento.belongsTo(Colaborador, { foreignKey: "colaborador_id", as: "colaborador", constraints: false });
+RegistoPresenca.hasMany(BancoHoraMovimento, { foreignKey: "registo_presenca_id", as: "banco_horas_movimentos", constraints: false });
+BancoHoraMovimento.belongsTo(RegistoPresenca, { foreignKey: "registo_presenca_id", as: "registo_presenca", constraints: false });
 
 // Utilizador -> Notificacoes
 Utilizador.hasMany(Notificacao, { foreignKey: "utilizador_id", as: "notificacoes" });
@@ -307,6 +322,14 @@ var syncDatabase = async () => {
     console.log(" conexao com BD estabelecida!");
     console.log(" a verificar colunas na BD...");
 
+    // Banco de horas: cria a tabela se ainda nao existir (idempotente).
+    try {
+      await BancoHoraMovimento.sync();
+      console.log(" Tabela 'banco_horas_movimentos' garantida!");
+    } catch (bancoErr) {
+      console.log(" Aviso: tabela 'banco_horas_movimentos':", bancoErr.message);
+    }
+
     try {
       var resultado = await sequelize.query("SHOW COLUMNS FROM `registos_presenca`");
       var colunas = Array.isArray(resultado[0]) ? resultado[0] : resultado;
@@ -377,6 +400,10 @@ var syncDatabase = async () => {
       if (nomes2.indexOf("desconto_faltas") === -1) {
         await sequelize.query("ALTER TABLE `pagamentos` ADD COLUMN `desconto_faltas` DECIMAL(12,2) DEFAULT 0");
         console.log(" Coluna 'desconto_faltas' adicionada!");
+      }
+      if (nomes2.indexOf("desconto_banco_horas") === -1) {
+        await sequelize.query("ALTER TABLE `pagamentos` ADD COLUMN `desconto_banco_horas` DECIMAL(12,2) DEFAULT 0");
+        console.log(" Coluna 'desconto_banco_horas' adicionada!");
       }
       if (nomes2.indexOf("data_pagamento") === -1) {
         await sequelize.query("ALTER TABLE `pagamentos` ADD COLUMN `data_pagamento` DATE NULL");
@@ -637,6 +664,7 @@ module.exports = {
   Licenca,
   RegistoPresenca,
   Turno,
+  BancoHoraMovimento,
   CicloAvaliacao,
   AvaliacaoDesempenho,
   CursoFormacao,

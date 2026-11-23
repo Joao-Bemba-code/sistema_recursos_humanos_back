@@ -4,11 +4,11 @@ dotenv.config({path: __dirname + '/.env'});
 var mysql = require('mysql2/promise');
 
 var OLD_CONFIG = {
-    host: process.env.Host_database,
-    user: process.env.User_database,
-    password: process.env.Pass_database,
-    database: process.env.Name_database,
-    port: parseInt(process.env.Port_database) || 3306,
+    host: process.env.Host_database || process.env.HOST_DATABASE,
+    user: process.env.User_database || process.env.USER_DATABASE,
+    password: process.env.Pass_database || process.env.PASS_DATABASE,
+    database: process.env.Name_database || process.env.NAME_DATABASE,
+    port: parseInt(process.env.Port_database || process.env.PORT_DATABASE) || 3306,
 };
 
 var NEW_CONFIG = {

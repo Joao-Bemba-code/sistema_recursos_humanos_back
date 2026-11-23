@@ -33,9 +33,16 @@ var migrations = async function () {
     await sequelize.authenticate();
     console.log(" A executar migracoes da base de dados...");
 
-    // Garantir que as tabelas existem (cria apenas as que faltam)
-    await syncModel.sync();
-    console.log(" Tabelas sincronizadas.");
+    // Garantir que as tabelas existem (cria apenas as que faltam).
+    // Em some bancos geridos (ex.: TiDB Cloud) o sync() pode falhar por
+    // restricoes/indices. Nao pode impedir as migracoes manuais abaixo,
+    // sobretudo a criacao de 'utilizadores_perfis', usada no login.
+    try {
+      await syncModel.sync();
+      console.log(" Tabelas sincronizadas.");
+    } catch (eSync) {
+      console.log(" Aviso: sync() falhou, a continuar com as migracoes manuais:", eSync.message);
+    }
 
     // ==================== MULTI-PERFIS: tabela utilizadores_perfis ====================
     // Sem FKs a nivel de BD para compatibilidade com TiDB; a integridade e gerida pela app
@@ -127,6 +134,37 @@ var migrations = async function () {
     );
     console.log(" Tabela 'creditos_movimentos' garantida!");
 
+    // ==================== BANCO DE HORAS ====================
+    // Divida por saida antecipada, credito por horas feitas a mais.
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `banco_horas_movimentos` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`colaborador_id` CHAR(36) NOT NULL, " +
+      "`registo_presenca_id` CHAR(36) NULL, " +
+      "`pedido_id` CHAR(36) NULL, " +
+      "`pagamento_id` CHAR(36) NULL, " +
+      "`tipo` ENUM('deficit_saida_antecipada','compensacao') NOT NULL, " +
+      "`data` DATE NOT NULL, " +
+      "`horas` DECIMAL(10,2) NOT NULL, " +
+      "`horas_compensadas` DECIMAL(10,2) NOT NULL DEFAULT 0, " +
+      "`estado` ENUM('aberto','justificado','descontado') NOT NULL DEFAULT 'aberto', " +
+      "`observacoes` TEXT NULL, " +
+      "`justificado_por` CHAR(36) NULL, " +
+      "`justificado_em` DATETIME NULL, " +
+      "`processada_mes` INT NULL, " +
+      "`processada_ano` INT NULL, " +
+      "`valor_descontado` DECIMAL(12,2) NOT NULL DEFAULT 0, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "KEY `banco_horas_colab_data_idx` (`colaborador_id`, `data`), " +
+      "KEY `banco_horas_colab_estado_idx` (`colaborador_id`, `estado`), " +
+      "KEY `banco_horas_registo_idx` (`registo_presenca_id`), " +
+      "KEY `banco_horas_pedido_idx` (`pedido_id`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'banco_horas_movimentos' garantida!");
+
     // ==================== NOVO MODULO: UTILIZADORES / PERFIS ====================
     // Garantir colunas do rbac nos utilizadores
     await adicionarColuna("utilizadores", "perfil_id", "CHAR(36) NULL");
@@ -179,6 +217,7 @@ var migrations = async function () {
 
     // ==================== PAGAMENTOS ====================
     await adicionarColuna("pagamentos", "desconto_faltas", "DECIMAL(12,2) DEFAULT 0");
+    await adicionarColuna("pagamentos", "desconto_banco_horas", "DECIMAL(12,2) DEFAULT 0");
     await adicionarColuna("pagamentos", "data_pagamento", "DATE NULL");
     await adicionarColuna("pagamentos", "recibo", "VARCHAR(500) NULL");
 
@@ -1088,6 +1127,62 @@ var migrations = async function () {
     } catch (eCursosOrg) {
       console.log(" Aviso: nao foi possivel isolar os cursos de formacao:", eCursosOrg.message);
     }
+
+    // ==================== FORMACAO: conclusao, resultado e certificado ====================
+    // A conclusao continua a poder ser estimada pelas datas do curso, mas o RH
+    // pode concluir manualmente (atrasos, cursos sem data de fim, etc.). O
+    // certificado e um ficheiro real (PDF/PNG/JPG) carregado pelo administrador.
+    await adicionarColuna("inscricoes_formacao", "resultado", "VARCHAR(50) NULL");
+    await adicionarColuna("inscricoes_formacao", "data_conclusao", "DATE NULL");
+    await adicionarColuna("inscricoes_formacao", "concluida_manualmente", "BOOLEAN NOT NULL DEFAULT false");
+    await adicionarColuna("inscricoes_formacao", "certificado_ficheiro_id", "CHAR(36) NULL");
+    await alterarColuna("inscricoes_formacao", "horas_realizadas", "DECIMAL(6,2) NULL");
+    try {
+      await sequelize.query(
+        "ALTER TABLE `inscricoes_formacao` ADD INDEX `insc_formacao_certificado_idx` (`certificado_ficheiro_id`)"
+      );
+    } catch (eIdxCert) {
+      // Indice ja existe (ou o motor nao o suporta) - nao e bloqueante.
+    }
+    // Backfill idempotente: inscricoes ja concluidas/certificadas recebem uma
+    // data de conclusao para o painel nao as mostrar como "em atraso".
+    try {
+      await sequelize.query(
+        "UPDATE `inscricoes_formacao` i SET i.`data_conclusao` = COALESCE(i.`data_certificado`, " +
+        "(SELECT c.`data_fim` FROM `cursos_formacao` c WHERE c.`id` = i.`curso_id`)) " +
+        "WHERE i.`data_conclusao` IS NULL AND i.`estado` IN ('Concluido','Certificado')"
+      );
+    } catch (eBackfillFormacao) {
+      console.log(" Aviso: backfill de conclusao de formacao:", eBackfillFormacao.message);
+    }
+    console.log(" Colunas de conclusao/certificado em 'inscricoes_formacao' garantidas!");
+
+    // ==================== FORMACAO: avaliacao formal ====================
+    // Nota minima configuravel por curso (0-20, por omissao 10) e registo de
+    // quem avaliou / quando / observacoes, para o colaborador poder consultar.
+    await adicionarColuna("cursos_formacao", "nota_minima_aprovacao", "DECIMAL(4,2) NULL DEFAULT 10.00");
+    await adicionarColuna("inscricoes_formacao", "data_avaliacao", "DATE NULL");
+    await adicionarColuna("inscricoes_formacao", "avaliado_por", "CHAR(36) NULL");
+    await adicionarColuna("inscricoes_formacao", "avaliacao_observacoes", "TEXT NULL");
+    try {
+      await sequelize.query(
+        "UPDATE `cursos_formacao` SET `nota_minima_aprovacao` = 10.00 " +
+        "WHERE `nota_minima_aprovacao` IS NULL"
+      );
+      await sequelize.query(
+        "UPDATE `inscricoes_formacao` SET " +
+        "`data_avaliacao` = COALESCE(`data_certificado`, `data_conclusao`, DATE(`updatedAt`)) " +
+        "WHERE `data_avaliacao` IS NULL AND `nota_avaliacao` IS NOT NULL"
+      );
+      await sequelize.query(
+        "UPDATE `inscricoes_formacao` SET `resultado` = " +
+        "CASE WHEN `nota_avaliacao` >= 10 THEN 'Aprovado' ELSE 'Reprovado' END " +
+        "WHERE `resultado` IS NULL AND `nota_avaliacao` IS NOT NULL"
+      );
+    } catch (eBackfillAvaliacao) {
+      console.log(" Aviso: backfill de avaliacao de formacao:", eBackfillAvaliacao.message);
+    }
+    console.log(" Colunas de avaliacao em cursos/inscricoes garantidas!");
 
     // ==================== AVALIACAO: ciclos por organizacao ====================
     // Os ciclos passam a pertencer a uma organizacao (isolamento multi-org).

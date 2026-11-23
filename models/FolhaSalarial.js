@@ -110,6 +110,10 @@ var Pagamento = sequelize.define("Pagamento", {
     type: DataTypes.DECIMAL(12, 2),
     defaultValue: 0,
   },
+  desconto_banco_horas: {
+    type: DataTypes.DECIMAL(12, 2),
+    defaultValue: 0,
+  },
   total_liquido: {
     type: DataTypes.DECIMAL(12, 2),
     allowNull: false,

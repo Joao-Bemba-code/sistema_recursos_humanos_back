@@ -1,5 +1,6 @@
 var { Colaborador, Ferias, SolicitacaoFerias, AvaliacaoDesempenho, CicloAvaliacao, PedidoColaborador, RegistoPresenca, Contrato, Pagamento, Tarefa, TarefaAlocacao } = require("../models");
 var { Op, Sequelize } = require("sequelize");
+var { calcularSaldo, calcularDesconto } = require("../helpers/bancoHoras");
 
 var formatarDataLocal = function (d) {
   var ano = d.getFullYear();
@@ -104,6 +105,31 @@ var calcularDescontoEstimado = async function (colaborador_id) {
   } catch (e) {
     console.log("Erro ao calcular desconto estimado:", e.message);
     return { faltas_mes: 0, horas_descontar: 0, valor: 0, salario_diario: 0 };
+  }
+};
+
+var resumoBancoHoras = async function (colaborador_id) {
+  var vazio = {
+    banco_horas: { saldo: 0, horas_devidas: 0, horas_credito: 0 },
+    horas_banco_descontar: 0,
+    desconto_banco_horas: 0,
+  };
+  try {
+    var saldo = await calcularSaldo(colaborador_id);
+    var agora = new Date();
+    var desconto = await calcularDesconto(colaborador_id, agora.getMonth() + 1, agora.getFullYear());
+    return {
+      banco_horas: {
+        saldo: saldo.saldo,
+        horas_devidas: saldo.horas_devidas,
+        horas_credito: saldo.horas_credito,
+      },
+      horas_banco_descontar: desconto.horas,
+      desconto_banco_horas: desconto.total,
+    };
+  } catch (e) {
+    console.log("Erro ao resumir banco de horas do portal:", e.message);
+    return vazio;
   }
 };
 
@@ -288,7 +314,10 @@ var getPortalStats = async function (req, res) {
         pedidos_recentes: pedidos,
         faltas: faltas,
         presencas: presencas,
-        desconto_estimado: await calcularDescontoEstimado(colaborador.id),
+        desconto_estimado: Object.assign(
+          await calcularDescontoEstimado(colaborador.id),
+          await resumoBancoHoras(colaborador.id)
+        ),
       },
     });
   } catch (e) {

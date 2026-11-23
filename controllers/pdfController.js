@@ -330,6 +330,7 @@ exports.folhaSalarial = async function (req, res) {
       ["  INSS", pagamento.seguranca_social],
       ["  Outros Descontos", pagamento.descontos],
       ["  Desconto Faltas", pagamento.desconto_faltas],
+      ["  Desconto Banco de Horas", pagamento.desconto_banco_horas],
     ];
 
     for (var j = 0; j < descontos.length; j++) {
@@ -338,7 +339,7 @@ exports.folhaSalarial = async function (req, res) {
     }
     y += 4;
 
-    var totalDescontos = (parseFloat(pagamento.irt) || 0) + (parseFloat(pagamento.seguranca_social) || 0) + (parseFloat(pagamento.descontos) || 0) + (parseFloat(pagamento.desconto_faltas) || 0);
+    var totalDescontos = (parseFloat(pagamento.irt) || 0) + (parseFloat(pagamento.seguranca_social) || 0) + (parseFloat(pagamento.descontos) || 0) + (parseFloat(pagamento.desconto_faltas) || 0) + (parseFloat(pagamento.desconto_banco_horas) || 0);
     reciboTotalRow("Total Descontos", "- " + fmt(totalDescontos) + " Kz");
 
     y += 4;
@@ -1129,7 +1130,7 @@ exports.resumoPagamentos = async function (req, res) {
 
     // Agregacao
     var totalColab = pagamentos.length;
-    var totalBruto = 0, totalSubsidios = 0, totalExtras = 0, totalIRT = 0, totalSS = 0, totalFaltas = 0, totalDescontos = 0, totalLiquido = 0;
+    var totalBruto = 0, totalSubsidios = 0, totalExtras = 0, totalIRT = 0, totalSS = 0, totalFaltas = 0, totalBancoHoras = 0, totalDescontos = 0, totalLiquido = 0;
     var porEstado = { Pendente: 0, Pago: 0, Cancelado: 0 };
 
     pagamentos.forEach(function (p) {
@@ -1139,6 +1140,7 @@ exports.resumoPagamentos = async function (req, res) {
       totalIRT += parseFloat(p.irt) || 0;
       totalSS += parseFloat(p.seguranca_social) || 0;
       totalFaltas += parseFloat(p.desconto_faltas) || 0;
+      totalBancoHoras += parseFloat(p.desconto_banco_horas) || 0;
       totalDescontos += parseFloat(p.descontos) || 0;
       totalLiquido += parseFloat(p.total_liquido) || 0;
       if (porEstado[p.estado] !== undefined) porEstado[p.estado]++;
@@ -1163,6 +1165,7 @@ exports.resumoPagamentos = async function (req, res) {
     resumoRow("Total IRT", "- " + fmt(totalIRT) + " Kz");
     resumoRow("Total INSS", "- " + fmt(totalSS) + " Kz");
     resumoRow("Total Desconto Faltas", "- " + fmt(totalFaltas) + " Kz");
+    resumoRow("Total Desconto Banco de Horas", "- " + fmt(totalBancoHoras) + " Kz");
     resumoRow("Total Descontos", "- " + fmt(totalDescontos) + " Kz");
 
     var ly = y;
@@ -1185,8 +1188,8 @@ exports.resumoPagamentos = async function (req, res) {
     doc.text("DETALHE POR COLABORADOR", ml, y);
     y += 18;
 
-    var headers = ["N.", "Colaborador", "IBAN", "Salario Base", "Subsidios", "Extras", "IRT", "INSS", "Descontos", "Faltas", "Liquido", "Estado"];
-    var colWidths = [25, 130, 100, 62, 50, 45, 45, 48, 45, 60, 50];
+    var headers = ["N.", "Colaborador", "IBAN", "Salario Base", "Subsidios", "Extras", "IRT", "INSS", "Descontos", "Faltas", "Banco Horas", "Liquido", "Estado"];
+    var colWidths = [25, 114, 100, 62, 50, 45, 45, 48, 48, 50, 55, 60, 60];
     var startX = 40;
     var tableW = pw - 80;
 
@@ -1242,6 +1245,7 @@ exports.resumoPagamentos = async function (req, res) {
         fmt(p.seguranca_social),
         fmt(p.descontos),
         fmt(p.desconto_faltas),
+        fmt(p.desconto_banco_horas),
         fmt(p.total_liquido),
         p.estado,
       ];
@@ -1261,6 +1265,7 @@ exports.resumoPagamentos = async function (req, res) {
       fmt(totalSS),
       fmt(totalDescontos),
       fmt(totalFaltas),
+      fmt(totalBancoHoras),
       fmt(totalLiquido),
       "",
     ], y, false, true);
