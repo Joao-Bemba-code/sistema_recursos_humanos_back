@@ -12,7 +12,10 @@ var authenticate = async (req, res, next) => {
     var token = header.split(" ")[1];
     var decoded;
     try {
-      decoded = jwt.verify(token, process.env.SECRET);
+      decoded = jwt.verify(token, process.env.SECRET, { algorithms: ["HS256"] });
+      if (decoded && decoded.type === "refresh") {
+        return res.status(401).json({ error: "Token de atualizacao invalido para acesso" });
+      }
     } catch (e) {
       if (e.name === "TokenExpiredError") {
         return res.status(401).json({ error: "Sessão expirada. Faça login novamente." });
@@ -80,7 +83,11 @@ var authenticateOptional = async (req, res, next) => {
     }
     var token = header.split(" ")[1];
     try {
-      var decoded = jwt.verify(token, process.env.SECRET);
+      var decoded = jwt.verify(token, process.env.SECRET, { algorithms: ["HS256"] });
+      if (decoded && decoded.type === "refresh") {
+        req.utilizador = null;
+        return next();
+      }
       var utilizador = await Utilizador.findByPk(decoded.id, {
         include: [
           { model: Perfil, as: "perfil" },

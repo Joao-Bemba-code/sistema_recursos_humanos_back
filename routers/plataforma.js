@@ -1,12 +1,21 @@
 var express = require("express");
+var rateLimit = require("express-rate-limit");
 var router = express.Router();
 var controller = require("../controllers/plataformaController");
 var authController = require("../controllers/authController");
 var { authenticate } = require("../protect/auth");
 var { requireSuperAdmin } = require("../protect/rbac");
 
+var limiteLogin = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "Demasiadas tentativas. Tente novamente mais tarde." },
+});
+
 // Login publico e exclusivo da plataforma (nao e o login das organizacoes).
-router.post("/login", authController.loginPlataforma);
+router.post("/login", limiteLogin, authController.loginPlataforma);
 
 // Painel da plataforma: so contas com super_admin = true.
 // Nao pertence a nenhuma organizacao e nao expoe dados de nenhuma delas

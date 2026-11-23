@@ -3,8 +3,9 @@ var fileUpload = require("express-fileupload");
 var dotenv = require("dotenv");
 dotenv.config();
 
-if (!process.env.SECRET) {
-  console.error("SECRET nao definido no .env. Configure SECRET=<valor aleatorio> antes de iniciar.");
+var segredo = String(process.env.SECRET || "");
+if (segredo.length < 32 || /django-insecure|secret|password|changeme/i.test(segredo)) {
+  console.error("SECRET fraco. Defina SECRET com pelo menos 32 caracteres aleatorios (ex.: openssl rand -base64 48).");
   process.exit(1);
 }
 
@@ -14,7 +15,7 @@ var morgan = require("morgan");
 var path = require("path");
 var { sanitizeBody } = require("./middlewars/sanitizer");
 var errorHandler = require("./middlewars/errorHandler");
-var { authenticate } = require("./protect/auth");
+var { authenticate, authenticateFlexivel } = require("./protect/auth");
 
 var authRoutes = require("./routers/auth");
 var userRoutes = require("./routers/users");
@@ -76,15 +77,26 @@ var port = process.env.PORT || 8000;
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
+var origensPermitidas = String(process.env.CORS_ORIGINS || process.env.ALLOWED_ORIGINS ||
+  "https://apikamgest.store,https://www.apikamgest.store")
+  .split(",")
+  .map(function (s) { return s.trim(); })
+  .filter(Boolean);
+
+var origemAutorizada = function (origin) {
+  if (!origin) return true; // pedidos sem Origin (app, curl, servidor)
+  if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return true;
+  return origensPermitidas.indexOf(origin) !== -1;
+};
+
 app.use(cors({
   origin: function (origin, callback) {
-    // Refletir sempre a origem do pedido. A autenticacao usa tokens (Authorization),
-    // nao cookies, pelo que nao ha risco de CSRF associado a CORS.
-    callback(null, true);
+    if (origemAutorizada(origin)) return callback(null, true);
+    return callback(new Error("Origem nao autorizada"));
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "x-bridge-token"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "x-bridge-token", "x-health-token"],
   exposedHeaders: ["Content-Disposition"],
   maxAge: 86400,
 }));
@@ -103,15 +115,26 @@ app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 // Sanitizacao
 app.use(sanitizeBody);
 
-// Logging
-app.use(morgan("dev"));
+// Logging: nunca escrever tokens de autenticacao nos logs.
+morgan.token("safe-url", function (req) {
+  return String(req.originalUrl || req.url || "").replace(/([?&]token=)[^&]*/gi, "$1[REDACTADO]");
+});
+app.use(morgan(":method :safe-url :status :response-time ms"));
 
-// Uploads estaticos
-app.use("/uploads", express.static(path.join(__dirname, "uploads"), { setHeaders: function(res) { res.set("Cache-Control", "no-store, no-cache, must-revalidate"); res.set("Pragma", "no-cache"); } }));
+// Uploads legados em disco: exigem autenticacao (header ou ?token= para <img>/<a>).
+app.use("/uploads", authenticateFlexivel, express.static(path.join(__dirname, "uploads"), {
+  dotfiles: "deny",
+  index: false,
+  setHeaders: function (res) {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("X-Content-Type-Options", "nosniff");
+  },
+}));
 
-// LOG de rotas
+// LOG de rotas (sem tokens)
 app.use(function (req, res, next) {
-  console.log(" " + req.method + " " + req.url);
+  console.log(" " + req.method + " " + String(req.originalUrl || req.url).replace(/([?&]token=)[^&]*/gi, "$1[REDACTADO]"));
   next();
 });
 
@@ -164,57 +187,22 @@ app.get("/health", function (req, res) {
   });
 });
 
-// Diagnostico da base de dados (sem credenciais). Serve para confirmar no
-// deploy que a API está ligada à BD certa e que as tabelas do login existem.
+// Diagnostico minimo da BD: apenas estado, sem host, schema, tabelas ou colunas.
+// Se HEALTH_TOKEN estiver definido, exige esse token (header ou ?token=).
 app.get("/health/db", async function (req, res) {
-  var hostBd = process.env.Host_database || process.env.HOST_DATABASE || process.env.DB_HOST || "";
-  var configuracao = {
-    host: hostBd || null,
-    port: process.env.Port_database || process.env.PORT_DATABASE || process.env.DB_PORT || null,
-    database: process.env.Name_database || process.env.NAME_DATABASE || process.env.DB_NAME || null,
-    dialect: process.env.Lang_database || process.env.LANG_DATABASE || process.env.DB_DIALECT || "mysql",
-    ssl: String(process.env.SSL_database || process.env.SSL_DATABASE || process.env.DB_SSL || "").toLowerCase() === "true" ||
-      /tidbcloud\.com/i.test(hostBd),
-  };
+  var token = process.env.HEALTH_TOKEN || process.env.HEALTH_TOKEN_DATABASE;
+  var fornecido = req.headers["x-health-token"] || (req.query && req.query.token);
+  if (token && String(fornecido || "") !== String(token)) {
+    return res.status(403).json({ ligacao: "nao_autorizado" });
+  }
 
   try {
     await sequelize.authenticate();
+    return res.status(200).json({ ligacao: "ok" });
   } catch (e) {
-    return res.status(503).json({
-      ligacao: "erro",
-      erro: e.message,
-      configuracao: configuracao,
-    });
+    console.log("Falha na ligacao BD (health):", e.message);
+    return res.status(503).json({ ligacao: "erro" });
   }
-
-  var tabelas = {};
-  var esperadas = ["utilizadores", "perfis", "organizacoes", "utilizadores_perfis", "colaboradores"];
-  for (var i = 0; i < esperadas.length; i++) {
-    var tabela = esperadas[i];
-    try {
-      var resultado = await sequelize.query("SHOW TABLES LIKE '" + tabela + "'");
-      var linhas = Array.isArray(resultado[0]) ? resultado[0] : resultado;
-      tabelas[tabela] = linhas.length > 0;
-    } catch (eTabela) {
-      tabelas[tabela] = "erro: " + eTabela.message;
-    }
-  }
-
-  var colunasUtilizadores = [];
-  try {
-    var resColunas = await sequelize.query("SHOW COLUMNS FROM `utilizadores`");
-    var linhasColunas = Array.isArray(resColunas[0]) ? resColunas[0] : resColunas;
-    colunasUtilizadores = linhasColunas.map(function (c) { return c.Field; });
-  } catch (eColunas) {
-    colunasUtilizadores = ["erro: " + eColunas.message];
-  }
-
-  return res.status(200).json({
-    ligacao: "ok",
-    configuracao: configuracao,
-    tabelas: tabelas,
-    colunas_utilizadores: colunasUtilizadores,
-  });
 });
 
 // Rota de teste
@@ -226,14 +214,12 @@ app.get("/", function (req, res) {
   res.status(200).json({
     msg: "API Sistema de Gestão de Recursos Humanos",
     versao: "1.0.0",
-    empresa: "CENFFOR",
-    port: port,
   });
 });
 
 // 404
 app.use(function (req, res) {
-  console.log("Rota não encontrada: " + req.method + " " + req.url);
+  console.log("Rota nao encontrada: " + req.method + " " + String(req.originalUrl || req.url).replace(/([?&]token=)[^&]*/gi, "$1[REDACTADO]"));
   res.status(404).json({ error: "Rota não encontrada" });
 });
 

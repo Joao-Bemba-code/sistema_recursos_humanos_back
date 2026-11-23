@@ -59,7 +59,7 @@ var generateToken = function (utilizador) {
       organizacao_id: utilizador.organizacao_id,
     },
     process.env.SECRET,
-    { expiresIn: "24h" }
+    { algorithm: "HS256", expiresIn: "24h" }
   );
 };
 
@@ -67,7 +67,7 @@ var generateRefreshToken = function (utilizador) {
   return jwt.sign(
     { id: utilizador.id, type: "refresh" },
     process.env.SECRET,
-    { expiresIn: "7d" }
+    { algorithm: "HS256", expiresIn: "7d" }
   );
 };
 
