@@ -9,6 +9,7 @@ var {
   validarSubscricaoPush,
   montarPayloadPush,
   obterConfiguracaoVapid,
+  assinaturaWebPush,
   enviarPushNotificacao,
 } = require("../helpers/notificacaoPush");
 
@@ -34,6 +35,13 @@ test("validacao aceita uma subscricao real e rejeita endpoints/chaves invalidas"
   assert.match(validarSubscricaoPush({ endpoint: "http://inseguro.exemplo", keys: entrada.keys }).erro, /HTTPS/);
   assert.match(validarSubscricaoPush({ endpoint: entrada.endpoint, keys: { p256dh: "abc", auth: "abc" } }).erro, /p256dh/);
   assert.match(validarSubscricaoPush(null).erro, /invalida/);
+  assert.match(validarSubscricaoPush({ endpoint: entrada.endpoint }).erro, /Chaves/);
+  assert.throws(function () { assinaturaWebPush(null); }, /invalida/);
+  assert.throws(function () { assinaturaWebPush({ endpoint: entrada.endpoint }); }, /sem chaves/);
+  assert.deepEqual(assinaturaWebPush({ endpoint: entrada.endpoint, p256dh: entrada.keys.p256dh, auth: entrada.keys.auth }), {
+    endpoint: entrada.endpoint,
+    keys: entrada.keys,
+  });
 });
 
 test("payload limpa o texto e so abre links internos", function () {

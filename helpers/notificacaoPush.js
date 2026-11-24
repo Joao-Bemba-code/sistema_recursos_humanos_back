@@ -160,12 +160,20 @@ var obterConfiguracaoVapid = function (ambiente) {
 };
 
 var assinaturaWebPush = function (subscricao) {
+  if (!subscricao || typeof subscricao !== "object") {
+    throw new Error("Subscricao push invalida");
+  }
+
+  var endpoint = String(subscricao.endpoint || "").trim();
+  var p256dh = String(subscricao.p256dh || "").trim();
+  var auth = String(subscricao.auth || "").trim();
+  if (!endpoint || !p256dh || !auth) {
+    throw new Error("Subscricao push sem chaves");
+  }
+
   return {
-    endpoint: subscricao.endpoint,
-    keys: {
-      p256dh: subscricao.p256dh,
-      auth: subscricao.auth,
-    },
+    endpoint: endpoint,
+    keys: { p256dh: p256dh, auth: auth },
   };
 };
 
