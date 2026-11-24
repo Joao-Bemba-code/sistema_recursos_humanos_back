@@ -26,6 +26,7 @@ var EscalaSemanal = require("./EscalaSemanal");
 var { Aviso } = require("./Comunicacao");
 var { ComunicacaoAnexo } = require("./ComunicacaoAnexo");
 var Notificacao = require("./Notificacao");
+var NotificacaoPush = require("./NotificacaoPush");
 var PedidoColaborador = require("./PedidoColaborador");
 var Ficheiro = require("./Ficheiro");
 var { Tarefa, TarefaEvento, TarefaAlocacao } = require("./Tarefa");
@@ -235,6 +236,12 @@ Notificacao.belongsTo(Utilizador, { foreignKey: "utilizador_id", as: "utilizador
 // Organizacao -> Notificacoes
 Organizacao.hasMany(Notificacao, { foreignKey: "organizacao_id", as: "notificacoes" });
 Notificacao.belongsTo(Organizacao, { foreignKey: "organizacao_id", as: "organizacao" });
+
+// Utilizador/Organizacao -> subscricoes push (sem FKs na BD, compatibilidade TiDB)
+Utilizador.hasMany(NotificacaoPush, { foreignKey: "utilizador_id", as: "subscricoes_push", constraints: false });
+NotificacaoPush.belongsTo(Utilizador, { foreignKey: "utilizador_id", as: "utilizador", constraints: false });
+Organizacao.hasMany(NotificacaoPush, { foreignKey: "organizacao_id", as: "subscricoes_push", constraints: false });
+NotificacaoPush.belongsTo(Organizacao, { foreignKey: "organizacao_id", as: "organizacao", constraints: false });
 
 // Colaborador -> PedidosColaborador
 Colaborador.hasMany(PedidoColaborador, { foreignKey: "colaborador_id", as: "pedidos" });
@@ -682,6 +689,7 @@ module.exports = {
   Aviso,
   ComunicacaoAnexo,
   Notificacao,
+  NotificacaoPush,
   PedidoColaborador,
   Ficheiro,
   Tarefa,

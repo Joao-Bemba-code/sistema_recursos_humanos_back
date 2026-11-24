@@ -234,6 +234,32 @@ var migrations = async function () {
     // ==================== NOTIFICACOES: separacao por modulo ====================
     await adicionarColuna("notificacoes", "modulo", "VARCHAR(50) NULL");
 
+    // ==================== NOTIFICACOES PUSH ====================
+    // Varios dispositivos por utilizador. O hash do endpoint permite um indice
+    // unico sem depender do tamanho maximo de indices em TEXT.
+    await sequelize.query(
+      "CREATE TABLE IF NOT EXISTS `notificacoes_push` (" +
+      "`id` CHAR(36) NOT NULL, " +
+      "`organizacao_id` CHAR(36) NOT NULL, " +
+      "`utilizador_id` CHAR(36) NOT NULL, " +
+      "`endpoint_hash` CHAR(64) NOT NULL, " +
+      "`endpoint` TEXT NOT NULL, " +
+      "`p256dh` TEXT NOT NULL, " +
+      "`auth` TEXT NOT NULL, " +
+      "`user_agent` VARCHAR(500) NULL, " +
+      "`ativo` BOOLEAN NOT NULL DEFAULT true, " +
+      "`ultimo_envio` DATETIME NULL, " +
+      "`ultimo_acesso` DATETIME NULL, " +
+      "`createdAt` DATETIME NOT NULL, " +
+      "`updatedAt` DATETIME NOT NULL, " +
+      "PRIMARY KEY (`id`), " +
+      "UNIQUE KEY `notificacoes_push_endpoint_hash_unique` (`endpoint_hash`), " +
+      "KEY `notificacoes_push_org_user_ativo_idx` (`organizacao_id`, `utilizador_id`, `ativo`), " +
+      "KEY `notificacoes_push_user_ativo_idx` (`utilizador_id`, `ativo`)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+    console.log(" Tabela 'notificacoes_push' garantida!");
+
     // ==================== AVISOS / COMUNICADOS ====================
     await adicionarColuna("avisos", "organizacao_id", "VARCHAR(36) NULL");
     await adicionarColuna("avisos", "criado_por", "VARCHAR(36) NULL");

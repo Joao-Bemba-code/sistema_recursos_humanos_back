@@ -31,6 +31,7 @@
     "pdfkit": "^0.19.1",
     "sequelize": "^6.37.8",
     "streamifier": "^0.1.1",
-    "uuid": "^14.0.1"
+    "uuid": "^14.0.1",
+    "web-push": "^4.0.0"
   }
 }
