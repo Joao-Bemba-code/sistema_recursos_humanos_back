@@ -78,7 +78,7 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 var origensPermitidas = String(process.env.CORS_ORIGINS || process.env.ALLOWED_ORIGINS ||
-  "https://apikamgest.store,https://www.apikamgest.store")
+  "https://kamgest-srh.com,https://www.kamgest-srh.com,https://apikamgest.store,https://www.apikamgest.store")
   .split(",")
   .map(function (s) { return s.trim(); })
   .filter(Boolean);
@@ -86,8 +86,6 @@ var origensPermitidas = String(process.env.CORS_ORIGINS || process.env.ALLOWED_O
 var origemAutorizada = function (origin) {
   if (!origin) return true; // pedidos sem Origin (app, curl, servidor)
   if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return true;
-  // O site publicado usa a API da Hostinger a partir do dominio Vercel.
-  if (origin === "https://nexushr-one.vercel.app") return true;
   return origensPermitidas.indexOf(origin) !== -1;
 };
 

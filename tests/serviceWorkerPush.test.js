@@ -9,7 +9,7 @@ function carregarServiceWorker() {
   var notificacoes = [];
   var abertas = [];
   var selfFalso = {
-    location: { origin: "https://nexushr-one.vercel.app" },
+    location: { origin: "https://kamgest-srh.com" },
     clients: {
       claim: async function () {},
       matchAll: async function () { return []; },
@@ -80,7 +80,7 @@ test("click reutiliza uma janela existente do SGHR", async function () {
   var focos = 0;
   sw.self.clients.matchAll = async function () {
     return [{
-      url: "https://nexushr-one.vercel.app/dashboard",
+      url: "https://kamgest-srh.com/dashboard",
       navigate: async function (url) { navegacoes.push(url); },
       focus: async function () { focos += 1; },
     }];
