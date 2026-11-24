@@ -71,14 +71,39 @@ var extrairBase64 = function (dados) {
   return dados;
 };
 
+var ehImagem = function (anexo) {
+  if (!anexo) return false;
+  var tipo = String(anexo.tipo || "").toLowerCase();
+  if (tipo.indexOf("image/") === 0) return true;
+  return /\.(avif|bmp|gif|heic|heif|jpe?g|png|svg|tiff?|webp)$/i.test(String(anexo.nome || ""));
+};
+
+var anexoValido = function (anexo) {
+  if (!anexo || !anexo.nome || !anexo.dados) return false;
+  var b64 = extrairBase64(anexo.dados);
+  return !!b64 && b64.length <= MAX_ANEXO_B64;
+};
+
+// Um comunicado pode ficar sem texto quando tem pelo menos uma imagem valida.
+var temImagemValida = function (anexos) {
+  if (!Array.isArray(anexos)) return false;
+  for (var i = 0; i < anexos.length && i < MAX_ANEXOS; i++) {
+    if (ehImagem(anexos[i]) && anexoValido(anexos[i])) return true;
+  }
+  return false;
+};
+
+var temConteudo = function (conteudo) {
+  return String(conteudo || "").trim().length > 0;
+};
+
 var criarAnexos = async function (comunicadoId, anexos) {
   if (!Array.isArray(anexos) || anexos.length === 0) return 0;
   var criados = 0;
   for (var i = 0; i < anexos.length && i < MAX_ANEXOS; i++) {
     var a = anexos[i];
-    if (!a || !a.nome || !a.dados) continue;
+    if (!anexoValido(a)) continue;
     var b64 = extrairBase64(a.dados);
-    if (!b64 || b64.length > MAX_ANEXO_B64) continue;
     await ComunicacaoAnexo.create({
       comunicado_id: comunicadoId,
       nome: String(a.nome).slice(0, 255),
@@ -328,11 +353,11 @@ var create = async function (req, res) {
   try {
     var dados = req.body;
 
-    if (!dados.titulo) {
+    if (!dados.titulo || !String(dados.titulo).trim()) {
       return res.status(400).json({ error: "titulo e obrigatorio" });
     }
-    if (!dados.conteudo) {
-      return res.status(400).json({ error: "conteudo e obrigatorio" });
+    if (!temConteudo(dados.conteudo) && !temImagemValida(dados.anexos)) {
+      return res.status(400).json({ error: "Escreva o conteudo ou adicione uma imagem ao comunicado" });
     }
 
     var anexos = dados.anexos;
@@ -349,6 +374,7 @@ var create = async function (req, res) {
 
     payload.organizacao_id = req.utilizador.organizacao_id;
     payload.criado_por = req.utilizador.id;
+    if (!temConteudo(payload.conteudo)) payload.conteudo = "";
 
     var aviso = await Aviso.create(payload);
 
@@ -399,6 +425,26 @@ var update = async function (req, res) {
     ));
     if (erroDestino) {
       return res.status(400).json({ error: erroDestino });
+    }
+
+    var conteudoFinal = Object.prototype.hasOwnProperty.call(dadosActualizar, "conteudo")
+      ? dadosActualizar.conteudo
+      : aviso.conteudo;
+    if (!temConteudo(conteudoFinal)) {
+      var removerValidacao = Array.isArray(req.body.anexos_remover) ? req.body.anexos_remover : [];
+      var anexosActuais = await ComunicacaoAnexo.findAll({
+        where: { comunicado_id: aviso.id },
+        attributes: ["id", "nome", "tipo"],
+      });
+      var existeImagem = anexosActuais.some(function (a) {
+        return removerValidacao.indexOf(a.id) === -1 && ehImagem(a);
+      });
+      if (!existeImagem && !temImagemValida(req.body.anexos)) {
+        return res.status(400).json({ error: "Escreva o conteudo ou adicione uma imagem ao comunicado" });
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(dadosActualizar, "conteudo") && !temConteudo(dadosActualizar.conteudo)) {
+      dadosActualizar.conteudo = "";
     }
 
     await aviso.update(dadosActualizar);
