@@ -4,6 +4,7 @@ var documentoController = require("./documentoController");
 var { temPermissao } = require("../protect/rbac");
 var { ORG_INEXISTENTE } = require("../helpers/organizacao");
 var { colaboradoresDoDepartamento, colaboradoresDaUnidade, colaboradoresSemUnidade } = require("../helpers/vinculos");
+var { proximoNumeroColaborador } = require("../helpers/numeroColaborador");
 
 // Unidades de negocio fixas da grafica (mesma lista do ENUM do modelo
 // Colaborador e de UNIDADES_NEGOCIO_VALIDAS na folha salarial)
@@ -131,19 +132,18 @@ var getById = async function (req, res) {
   }
 };
 
-var generateNumero = async function (organizacao_id) {
-  var maxColab = await Colaborador.findOne({
-    where: { organizacao_id: organizacao_id },
+// O numero de colaborador e unico em TODA a tabela (ver modelo Colaborador).
+// Gerar "COL-00001" por organizacao fazia a primeira pessoa de uma
+// organizacao nova colidir com a primeira da organizacao existente. Por isso
+// procuramos o maior numero usado em todas as organizacoes.
+var generateNumero = async function () {
+  var usados = await Colaborador.findAll({
     attributes: ["numero_colaborador"],
-    order: [["numero_colaborador", "DESC"]],
+    raw: true,
   });
-  var ultimo = 0;
-  if (maxColab && maxColab.numero_colaborador) {
-    var match = String(maxColab.numero_colaborador).match(/(\d+)$/);
-    if (match) ultimo = parseInt(match[1], 10);
-  }
-  var num = ultimo + 1;
-  return "COL-" + String(num).padStart(5, "0");
+  return proximoNumeroColaborador(usados.map(function (linha) {
+    return linha.numero_colaborador;
+  }));
 };
 
 var create = async function (req, res) {
@@ -216,11 +216,32 @@ var create = async function (req, res) {
       }
     }
 
-    if (!dados.numero_colaborador) {
-      dados.numero_colaborador = await generateNumero(req.organizacao_id);
+    var numeroFornecido = !!dados.numero_colaborador;
+    if (!numeroFornecido) {
+      dados.numero_colaborador = await generateNumero();
     }
 
-    var colaborador = await Colaborador.create(dados);
+    // A numeracao e global. Se dois pedidos chegarem ao mesmo tempo, o indice
+    // unico pode rejeitar o numero calculado; nesse caso tentamos o seguinte.
+    // Quando o numero veio do formulario/API, nao o substituimos: devolvemos o
+    // conflito para o utilizador escolher outro.
+    var colaborador = null;
+    for (var tentativa = 0; tentativa < 5 && !colaborador; tentativa++) {
+      try {
+        colaborador = await Colaborador.create(dados);
+      } catch (eNumero) {
+        var coluna = eNumero && eNumero.fields && eNumero.fields.numero_colaborador;
+        var erroNoNumero = (eNumero.errors || []).some(function (item) {
+          return item.path === "numero_colaborador";
+        });
+        var eConflitoNumero = eNumero.name === "SequelizeUniqueConstraintError" &&
+          (coluna || erroNoNumero);
+        if (numeroFornecido || !eConflitoNumero || tentativa === 4) {
+          throw eNumero;
+        }
+        dados.numero_colaborador = await generateNumero();
+      }
+    }
 
     if (documentos.length > 0) {
       await documentoController.aplicarDocumentos(colaborador, documentos, req.utilizador);
