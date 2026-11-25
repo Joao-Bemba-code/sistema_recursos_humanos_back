@@ -1,6 +1,6 @@
 var { Op } = require("sequelize");
 var { Aviso, ComunicacaoAnexo, Utilizador, Colaborador, Departamento, Cargo, Unidade, Seccao, UnidadeSeccao } = require("../models");
-var { perfisUtilizador, fundirPermissoes } = require("../protect/rbac");
+var { perfisUtilizador, fundirPermissoes, temPermissao } = require("../protect/rbac");
 var { vinculosDoColaborador } = require("../helpers/vinculos");
 
 // Limites dos anexos (guardados na BD em base64): ate 8 ficheiros, cada um
@@ -518,9 +518,9 @@ var togglePublicado = async function (req, res) {
   }
 };
 
-// Download de anexo: visivel para QUALQUER utilizador autenticado da
-// organizacao (desde que o comunicado esteja publicado ou o utilizador seja
-// gestor). O ficheiro vem da BD, nao do disco.
+// Download de anexo: o comunicado pode ser visivel para todos, mas o ficheiro
+// so e entregue a quem tem "Comunicados -> Download" no perfil.
+// O ficheiro vem da BD, nao do disco.
 var downloadAnexo = async function (req, res) {
   try {
     var anexo = await ComunicacaoAnexo.findOne({
@@ -540,6 +540,16 @@ var downloadAnexo = async function (req, res) {
 
     if (!anexo.comunicado.publicado && !isGestor(req)) {
       return res.status(403).json({ error: "Comunicado nao disponivel" });
+    }
+
+    // A permissao de download de anexos e controlada por perfil na matriz de
+    // Comunicados -> Download, independentemente dos documentos de colaborador.
+    if (!temPermissao(req.utilizador, "comunicados", "download")) {
+      return res.status(403).json({
+        error: "O seu perfil não permite descarregar anexos de comunicados",
+        modulo: "comunicados",
+        operacao: "download",
+      });
     }
 
     var b64 = extrairBase64(anexo.dados);

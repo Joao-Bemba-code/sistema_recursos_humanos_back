@@ -67,6 +67,10 @@ var migrations = async function () {
       console.log(" Aviso: nao foi possivel converter permissoes para JSON:", e.message);
     }
 
+    // Marcador da migracao de download: tem de existir ANTES de qualquer
+    // Perfil.findAll(), senao o SELECT falha com "Unknown column".
+    await adicionarColuna("perfis", "download_migrado", "BOOLEAN NOT NULL DEFAULT false");
+
     // ==================== NOVO MODULO: ADVERTENCIAS ====================
     // Tabela de ocorrencias disciplinares (model OcorrenciaDisciplinar)
     await sequelize.query(
@@ -1265,32 +1269,43 @@ var migrations = async function () {
     }
     console.log(" Colunas de atividades e permissao de download garantidas!");
 
-    // O download passa a ser controlado pela matriz de permissoes por perfil
-    // (Utilizadores -> Gerir Permissoes -> Documentos de Colaborador ->
-    // Download). Quem ja via documentos mantem o download, para nao perder
-    // acesso apos actualizar.
+    // O download passa a ser controlado pela matriz de permissoes por perfil:
+    // - Documentos de Colaborador -> Download (documentos enviados e mapa);
+    // - Comunicados -> Download (anexos de comunicados).
+    // A migracao so corre uma vez por perfil (download_migrado). Assim, depois
+    // de o administrador retirar o download, ele nao volta no proximo arranque.
     try {
       var perfisDownload = await Perfil.findAll();
       var perfisComDownload = 0;
       for (var di = 0; di < perfisDownload.length; di++) {
         var perfilDownload = perfisDownload[di];
+        if (perfilDownload.download_migrado) continue;
         var permDownload = perfilDownload.permissoes;
         if (typeof permDownload === "string") {
           try { permDownload = JSON.parse(permDownload); } catch (ePermDownloadJson) { permDownload = {}; }
         }
         if (!permDownload || typeof permDownload !== "object" || Array.isArray(permDownload)) permDownload = {};
-        var opsDownload = Array.isArray(permDownload.documentos_colaborador) ? permDownload.documentos_colaborador : [];
-        if (opsDownload.length === 0 || opsDownload.indexOf("download") !== -1) continue;
-        opsDownload.push("download");
-        if (opsDownload.indexOf("read") === -1) opsDownload.push("read");
-        permDownload.documentos_colaborador = opsDownload;
-        perfilDownload.permissoes = permDownload;
-        perfilDownload.changed("permissoes", true);
+        var alterouDownload = false;
+        ["documentos_colaborador", "comunicados"].forEach(function (moduloDownload) {
+          if (!Object.prototype.hasOwnProperty.call(permDownload, moduloDownload)) return;
+          var opsDownload = Array.isArray(permDownload[moduloDownload]) ? permDownload[moduloDownload].slice() : [];
+          if (opsDownload.length === 0 || opsDownload.indexOf("download") !== -1) return;
+          opsDownload.push("download");
+          if (opsDownload.indexOf("read") === -1) opsDownload.push("read");
+          permDownload[moduloDownload] = opsDownload;
+          alterouDownload = true;
+        });
+        if (alterouDownload) {
+          perfilDownload.permissoes = permDownload;
+          perfilDownload.changed("permissoes", true);
+          perfisComDownload++;
+        }
+        perfilDownload.download_migrado = true;
+        perfilDownload.changed("download_migrado", true);
         await perfilDownload.save();
-        perfisComDownload++;
       }
       if (perfisComDownload > 0) {
-        console.log(" Permissao 'download' de documentos concedida a " + perfisComDownload + " perfil(is)!");
+        console.log(" Permissao 'download' concedida a " + perfisComDownload + " perfil(is)!");
       }
     } catch (ePermDownload) {
       console.log(" Aviso: nao foi possivel conceder permissao de download:", ePermDownload.message);

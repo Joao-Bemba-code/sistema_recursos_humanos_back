@@ -488,10 +488,8 @@ function desenharMapa(doc, opcoes) {
   doc.font("Helvetica-Bold").fontSize(7).fillColor("#8a1c1c");
   doc.text("Portal RH - Obrigatorio", ml, y, { width: largura });
 
-  // O rodape tem de ficar DENTRO da margem inferior. Se for desenhado abaixo
-  // dela, o PDFKit abre automaticamente uma pagina extra so com este texto.
-  doc.font("Helvetica").fontSize(7).fillColor("#888888");
-  doc.text(nomeOrg + " | Documento gerado pelo sistema SGHR", ml, doc.page.height - doc.page.margins.bottom - 18, { width: largura, align: "center" });
+  // Sem rodape inferior: a linha "Documento gerado pelo sistema SGHR" abria
+  // uma pagina extra. A organizacao ja fica identificada no cabecalho.
 }
 
 function criarPdf(opcoes) {

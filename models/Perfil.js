@@ -29,6 +29,12 @@ var Perfil = sequelize.define("Perfil", {
     type: DataTypes.BOOLEAN,
     defaultValue: true,
   },
+  // Marca que a migracao inicial de download ja correu. Depois disso a
+  // permissao e decidida apenas pela matriz, sem voltar a ser concedida.
+  download_migrado: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
 }, {
   tableName: "perfis",
   timestamps: true,
