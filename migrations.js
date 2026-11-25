@@ -1233,6 +1233,69 @@ var migrations = async function () {
       console.log(" Aviso: nao foi possivel isolar os ciclos de avaliacao:", eCiclosOrg.message);
     }
 
+    // ==================== ATIVIDADES + DOWNLOAD DE DOCUMENTOS ====================
+    // Cada documento passa a ter a sua propria permissao de download e os logs
+    // de auditoria ganham contexto (organizacao/colaborador) para alimentar o
+    // feed /api/atividades sem expor dados sensiveis ao colaborador.
+    await adicionarColuna("colaborador_documentos", "permite_download", "BOOLEAN NOT NULL DEFAULT true");
+    await adicionarColuna("logs_auditoria", "organizacao_id", "CHAR(36) NULL");
+    await adicionarColuna("logs_auditoria", "colaborador_id", "CHAR(36) NULL");
+    await adicionarColuna("logs_auditoria", "descricao_publica", "TEXT NULL");
+    await adicionarColuna("logs_auditoria", "visivel_colaborador", "BOOLEAN NOT NULL DEFAULT true");
+    try {
+      await sequelize.query(
+        "ALTER TABLE `colaborador_documentos` ADD INDEX `colab_docs_download_idx` (`colaborador_id`, `permite_download`)"
+      );
+    } catch (eIdxDownload) {
+      // Indice ja existente - nao e bloqueante.
+    }
+    try {
+      await sequelize.query(
+        "ALTER TABLE `logs_auditoria` ADD INDEX `logs_auditoria_org_idx` (`organizacao_id`, `createdAt`)"
+      );
+    } catch (eIdxLogsOrg) {
+      // Indice ja existente - nao e bloqueante.
+    }
+    try {
+      await sequelize.query(
+        "ALTER TABLE `logs_auditoria` ADD INDEX `logs_auditoria_colab_idx` (`colaborador_id`, `createdAt`)"
+      );
+    } catch (eIdxLogsColab) {
+      // Indice ja existente - nao e bloqueante.
+    }
+    console.log(" Colunas de atividades e permissao de download garantidas!");
+
+    // O download passa a ser controlado pela matriz de permissoes por perfil
+    // (Utilizadores -> Gerir Permissoes -> Documentos de Colaborador ->
+    // Download). Quem ja via documentos mantem o download, para nao perder
+    // acesso apos actualizar.
+    try {
+      var perfisDownload = await Perfil.findAll();
+      var perfisComDownload = 0;
+      for (var di = 0; di < perfisDownload.length; di++) {
+        var perfilDownload = perfisDownload[di];
+        var permDownload = perfilDownload.permissoes;
+        if (typeof permDownload === "string") {
+          try { permDownload = JSON.parse(permDownload); } catch (ePermDownloadJson) { permDownload = {}; }
+        }
+        if (!permDownload || typeof permDownload !== "object" || Array.isArray(permDownload)) permDownload = {};
+        var opsDownload = Array.isArray(permDownload.documentos_colaborador) ? permDownload.documentos_colaborador : [];
+        if (opsDownload.length === 0 || opsDownload.indexOf("download") !== -1) continue;
+        opsDownload.push("download");
+        if (opsDownload.indexOf("read") === -1) opsDownload.push("read");
+        permDownload.documentos_colaborador = opsDownload;
+        perfilDownload.permissoes = permDownload;
+        perfilDownload.changed("permissoes", true);
+        await perfilDownload.save();
+        perfisComDownload++;
+      }
+      if (perfisComDownload > 0) {
+        console.log(" Permissao 'download' de documentos concedida a " + perfisComDownload + " perfil(is)!");
+      }
+    } catch (ePermDownload) {
+      console.log(" Aviso: nao foi possivel conceder permissao de download:", ePermDownload.message);
+    }
+
     console.log(" Migracoes concluidas com sucesso!");
   } catch (e) {
     console.log(" Erro nas migracoes:", e.message);

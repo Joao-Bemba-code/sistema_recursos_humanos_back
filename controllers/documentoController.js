@@ -1,6 +1,8 @@
 var path = require("path");
 var { Colaborador, ColaboradorDocumento, ColaboradorDocumentoEvento, Utilizador } = require("../models");
-var { lerBufferDeUrl, nomeDeReferencia } = require("../helpers/ficheiros");
+var { lerBufferDeUrl, nomeDeReferencia, responderComFicheiro } = require("../helpers/ficheiros");
+var { fundirPermissoes, perfisUtilizador, temPermissao } = require("../protect/rbac");
+var { registarAtividade } = require("../helpers/atividade");
 
 // Categorias fixas do separador Documentos. "outro" aceita varios registos.
 var CATEGORIAS_FIXAS = ["fotografia", "curriculo", "bi", "certificado", "contrato"];
@@ -55,6 +57,40 @@ var texto = function (valor, limite) {
   var s = String(valor).trim();
   if (!s) return null;
   return limite ? s.slice(0, limite) : s;
+};
+
+var booleano = function (valor) {
+  return valor === true || valor === 1 || valor === "1" ||
+    (typeof valor === "string" && valor.toLowerCase() === "true");
+};
+
+// Gestores (RH/admin) podem ver e descarregar documentos de qualquer
+// colaborador da organizacao. Os restantes ficam limitados aos seus.
+var podeGerirDocumentos = function (req) {
+  if (!req.utilizador) return false;
+  return fundirPermissoes(perfisUtilizador(req.utilizador)).nivel >= 4 ||
+    temPermissao(req.utilizador, "documentos_colaborador", "update") ||
+    temPermissao(req.utilizador, "documentos_colaborador", "delete");
+};
+
+var registarAtividadeDocumento = function (req, doc, accao, descricao, publica, visivel) {
+  return registarAtividade({
+    req: req,
+    accao: accao,
+    modulo: "documentos_colaborador",
+    entidade: "ColaboradorDocumento",
+    entidadeId: doc.id,
+    colaboradorId: doc.colaborador_id,
+    organizacaoId: doc.organizacao_id || req.organizacao_id || null,
+    descricao: descricao,
+    descricaoPublica: publica !== undefined ? publica : descricao,
+    visivelColaborador: visivel !== false,
+  });
+};
+
+var descricaoDocumento = function (doc) {
+  var categoria = CATEGORIA_LABEL[doc.categoria] || doc.categoria || "Documento";
+  return categoria + (doc.ficheiro_nome ? " — " + doc.ficheiro_nome : "");
 };
 
 // Aceita apenas referencias internas ou URLs http(s). Evita javascript: e
@@ -123,13 +159,14 @@ var normalizarItem = function (item) {
   if (item.ficheiro_tipo !== undefined) out.ficheiro_tipo = texto(item.ficheiro_tipo, 150);
   if (item.ficheiro_tamanho !== undefined) out.ficheiro_tamanho = parseInt(item.ficheiro_tamanho, 10) || null;
   if (item.estado !== undefined) out.estado = texto(item.estado, 30);
+  if (item.permite_download !== undefined) out.permite_download = booleano(item.permite_download);
   if (item.motivo_correcao !== undefined || item.motivo !== undefined) {
     out.motivo_correcao = texto(item.motivo_correcao || item.motivo, 2000);
   }
   return out;
 };
 
-var criarDocumento = async function (colaborador, item, utilizador) {
+var criarDocumento = async function (colaborador, item, utilizador, req) {
   if (!categoriaValida(item.categoria)) {
     throw erro(400, "Categoria de documento inválida");
   }
@@ -163,20 +200,30 @@ var criarDocumento = async function (colaborador, item, utilizador) {
     carregado_em: agora,
     validado_por: estado === "Validado" && utilizador ? utilizador.id : null,
     validado_em: estado === "Validado" ? agora : null,
+    permite_download: item.permite_download !== false,
   });
 
   await registarEvento(doc, "carregado", null, estado, utilizador ? utilizador.id : null, doc.motivo_correcao, null);
+  await registarAtividadeDocumento(
+    req,
+    doc,
+    "documento_carregado",
+    "Documento " + descricaoDocumento(doc) + " carregado para " + (colaborador.nome_completo || "colaborador"),
+    "Foi carregado um novo documento seu: " + descricaoDocumento(doc)
+  );
   await sincronizarLegado(colaborador, doc.categoria, doc.ficheiro_url);
   return doc;
 };
 
-var actualizarDocumento = async function (colaborador, doc, item, utilizador) {
+var actualizarDocumento = async function (colaborador, doc, item, utilizador, req) {
   var estadoAnterior = doc.estado;
   var urlAnterior = doc.ficheiro_url;
   var dados = {};
 
   if (item.tipo_documento !== undefined && doc.categoria === "outro") dados.tipo_documento = item.tipo_documento;
   if (item.descricao !== undefined && doc.categoria === "outro") dados.descricao = item.descricao;
+  var downloadAnterior = doc.permite_download !== false;
+  if (item.permite_download !== undefined) dados.permite_download = item.permite_download;
 
   var substituiu = false;
   if (item.ficheiro_url && item.ficheiro_url !== doc.ficheiro_url) {
@@ -223,6 +270,33 @@ var actualizarDocumento = async function (colaborador, doc, item, utilizador) {
   if (dados.estado && dados.estado !== (substituiu ? "Por conferir" : estadoAnterior)) {
     var acao = dados.estado === "Validado" ? "validado" : dados.estado === "A corrigir" ? "corrigir" : "estado";
     await registarEvento(doc, acao, substituiu ? "Por conferir" : estadoAnterior, dados.estado, utilizador ? utilizador.id : null, dados.motivo_correcao || null, null);
+    await registarAtividadeDocumento(
+      req,
+      doc,
+      "documento_" + acao,
+      "Documento " + descricaoDocumento(doc) + " passou para " + dados.estado,
+      "O estado do seu documento " + descricaoDocumento(doc) + " passou para " + dados.estado
+    );
+  }
+
+  if (item.permite_download !== undefined && dados.permite_download !== downloadAnterior) {
+    var liberou = !!dados.permite_download;
+    await registarEvento(
+      doc,
+      liberou ? "download_permitido" : "download_bloqueado",
+      null,
+      null,
+      utilizador ? utilizador.id : null,
+      liberou ? "Download permitido" : "Download bloqueado",
+      null
+    );
+    await registarAtividadeDocumento(
+      req,
+      doc,
+      liberou ? "download_permitido" : "download_bloqueado",
+      "Download " + (liberou ? "permitido" : "bloqueado") + " em " + descricaoDocumento(doc),
+      "O download do seu documento " + descricaoDocumento(doc) + " foi " + (liberou ? "permitido" : "bloqueado")
+    );
   }
 
   return doc;
@@ -230,7 +304,7 @@ var actualizarDocumento = async function (colaborador, doc, item, utilizador) {
 
 // Aplica uma lista de documentos vinda do formulario (criar/editar
 // colaborador). Itens sem id e sem ficheiro sao ignorados (slots "Em falta").
-var aplicarDocumentos = async function (colaborador, lista, utilizador) {
+var aplicarDocumentos = async function (colaborador, lista, utilizador, req) {
   if (!Array.isArray(lista) || lista.length === 0) return 0;
   var aplicados = 0;
 
@@ -248,7 +322,7 @@ var aplicarDocumentos = async function (colaborador, lista, utilizador) {
         where: { id: item.id, colaborador_id: colaborador.id },
       });
       if (!existente) throw erro(404, "Documento não encontrado");
-      await actualizarDocumento(colaborador, existente, item, utilizador);
+      await actualizarDocumento(colaborador, existente, item, utilizador, req);
       aplicados++;
       continue;
     }
@@ -260,13 +334,13 @@ var aplicarDocumentos = async function (colaborador, lista, utilizador) {
         where: { colaborador_id: colaborador.id, categoria: item.categoria },
       });
       if (docFixo) {
-        await actualizarDocumento(colaborador, docFixo, item, utilizador);
+        await actualizarDocumento(colaborador, docFixo, item, utilizador, req);
         aplicados++;
         continue;
       }
     }
 
-    await criarDocumento(colaborador, item, utilizador);
+    await criarDocumento(colaborador, item, utilizador, req);
     aplicados++;
   }
 
@@ -389,7 +463,7 @@ var create = async function (req, res) {
   try {
     var colaborador = await obterColaborador(req, req.params.id);
     var item = normalizarItem(req.body);
-    var doc = await criarDocumento(colaborador, item, req.utilizador);
+    var doc = await criarDocumento(colaborador, item, req.utilizador, req);
     var lista = await listarDocumentos(colaborador.id, req.organizacao_id);
     var criado = lista.filter(function (d) { return String(d.id) === String(doc.id); })[0] || doc;
     return res.status(201).json({ mensagem: "Documento carregado com sucesso", dados: criado });
@@ -407,7 +481,7 @@ var update = async function (req, res) {
     if (!doc) throw erro(404, "Documento não encontrado");
 
     var item = normalizarItem(req.body);
-    await actualizarDocumento(colaborador, doc, item, req.utilizador);
+    await actualizarDocumento(colaborador, doc, item, req.utilizador, req);
 
     var lista = await listarDocumentos(colaborador.id, req.organizacao_id);
     var actualizado = lista.filter(function (d) { return String(d.id) === String(doc.id); })[0] || doc;
@@ -426,6 +500,13 @@ var remove = async function (req, res) {
     if (!doc) throw erro(404, "Documento não encontrado");
 
     await registarEvento(doc, "removido", doc.estado, "Em falta", req.utilizador ? req.utilizador.id : null, null, doc.ficheiro_url);
+    await registarAtividadeDocumento(
+      req,
+      doc,
+      "documento_removido",
+      "Documento " + descricaoDocumento(doc) + " removido",
+      "O documento " + descricaoDocumento(doc) + " deixou de estar disponível"
+    );
     var categoria = doc.categoria;
     await doc.destroy();
     await sincronizarLegado(colaborador, categoria, null);
@@ -463,6 +544,65 @@ var ficheiro = async function (req, res) {
   }
 };
 
+// Download controlado pela permissao do perfil ("Documentos de Colaborador"
+// -> Download), verificada no servidor mesmo que o botao esteja escondido
+// na interface. Nunca se entrega o URL directo.
+var download = async function (req, res) {
+  try {
+    var colaborador = await obterColaborador(req, req.params.id);
+    var doc = await ColaboradorDocumento.findOne({
+      where: { id: req.params.docId, colaborador_id: colaborador.id },
+    });
+    if (!doc || !doc.ficheiro_url) throw erro(404, "Documento não encontrado");
+
+    if (!podeGerirDocumentos(req)) {
+      var meuColaborador = await Colaborador.findOne({
+        where: { utilizador_id: req.utilizador.id },
+        attributes: ["id"],
+      });
+      if (!meuColaborador || String(meuColaborador.id) !== String(colaborador.id)) {
+        throw erro(404, "Documento não encontrado");
+      }
+    }
+
+    if (!temPermissao(req.utilizador, "documentos_colaborador", "download")) {
+      await registarAtividadeDocumento(
+        req,
+        doc,
+        "download_bloqueado_tentativa",
+        "Tentativa de download bloqueada por permissão do perfil em " + descricaoDocumento(doc),
+        null,
+        false
+      );
+      throw erro(403, "O seu perfil não permite descarregar documentos");
+    }
+
+    var nome = doc.ficheiro_nome || nomeDeReferencia(doc.ficheiro_url, "documento");
+    var enviado = await responderComFicheiro(res, doc.ficheiro_url, nome);
+    if (!enviado) throw erro(404, "Conteúdo do documento indisponível");
+
+    await registarEvento(
+      doc,
+      "descarregado",
+      doc.estado,
+      doc.estado,
+      req.utilizador ? req.utilizador.id : null,
+      null,
+      null
+    );
+    await registarAtividadeDocumento(
+      req,
+      doc,
+      "documento_descarregado",
+      "Documento " + descricaoDocumento(doc) + " descarregado",
+      "O documento " + descricaoDocumento(doc) + " foi descarregado",
+      false
+    );
+  } catch (e) {
+    return responderErro(res, e, "descarregar documento");
+  }
+};
+
 module.exports = {
   CATEGORIAS_FIXAS,
   CATEGORIAS,
@@ -473,6 +613,7 @@ module.exports = {
   update,
   remove,
   ficheiro,
+  download,
   aplicarDocumentos,
   listarDocumentos,
   listarChecklist,

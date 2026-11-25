@@ -47,6 +47,25 @@ var LogAuditoria = sequelize.define("LogAuditoria", {
     type: DataTypes.TEXT,
     allowNull: true,
   },
+  // Campos do feed de atividades: o colaborador so ve a descricao publica e
+  // apenas dos eventos do seu colaborador (ou que ele proprio praticou).
+  organizacao_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
+  colaborador_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
+  descricao_publica: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
+  visivel_colaborador: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
 }, {
   tableName: "logs_auditoria",
   timestamps: true,
@@ -56,6 +75,8 @@ var LogAuditoria = sequelize.define("LogAuditoria", {
     { fields: ["accao"] },
     { fields: ["entidade", "entidade_id"] },
     { fields: ["createdAt"] },
+    { fields: ["organizacao_id", "createdAt"] },
+    { fields: ["colaborador_id", "createdAt"] },
   ],
 });
 

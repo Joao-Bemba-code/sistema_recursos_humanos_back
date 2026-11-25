@@ -244,7 +244,7 @@ var create = async function (req, res) {
     }
 
     if (documentos.length > 0) {
-      await documentoController.aplicarDocumentos(colaborador, documentos, req.utilizador);
+      await documentoController.aplicarDocumentos(colaborador, documentos, req.utilizador, req);
     }
 
     return res.status(201).json({
@@ -347,7 +347,7 @@ var update = async function (req, res) {
     await colaborador.update(dadosActualizar);
 
     if (documentos.length > 0) {
-      await documentoController.aplicarDocumentos(colaborador, documentos, req.utilizador);
+      await documentoController.aplicarDocumentos(colaborador, documentos, req.utilizador, req);
     }
 
     var actualizado = await Colaborador.findByPk(req.params.id, {

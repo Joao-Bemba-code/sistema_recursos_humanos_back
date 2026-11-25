@@ -75,6 +75,13 @@ var ColaboradorDocumento = sequelize.define("ColaboradorDocumento", {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  // Permissao de download deste documento em particular. Mesmo com o botao
+  // escondido, o backend volta a verificar esta flag antes de servir o ficheiro.
+  permite_download: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
 }, {
   tableName: "colaborador_documentos",
   timestamps: true,
@@ -105,7 +112,7 @@ var ColaboradorDocumentoEvento = sequelize.define("ColaboradorDocumentoEvento", 
     type: DataTypes.UUID,
     allowNull: true,
   },
-  // carregado | substituido | validado | corrigir | removido
+  // carregado | substituido | validado | corrigir | removido | descarregado | download_permitido | download_bloqueado
   acao: {
     type: DataTypes.STRING(30),
     allowNull: false,

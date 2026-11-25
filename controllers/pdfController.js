@@ -3,7 +3,7 @@ var path = require("path");
 var fs = require("fs");
 var os = require("os");
 var { Op } = require("sequelize");
-var { Vencimento, Pagamento, Colaborador, Contrato, Organizacao, ConvocatoriaDisciplinar, MedidaDisciplinar } = require("../models");
+var { Vencimento, Pagamento, Colaborador, Contrato, Organizacao, ConvocatoriaDisciplinar, MedidaDisciplinar, RegistoPresenca } = require("../models");
 var { listarPagamentosParaResumo } = require("./folhaSalarialController");
 var { incluirColaboradorDaOrg, ORG_INEXISTENTE } = require("../helpers/organizacao");
 var { listarChecklist } = require("./documentoController");
@@ -1587,3 +1587,295 @@ exports.relatorioMedidasDisciplinares = async function (req, res) {
     return res.status(500).json({ error: "Erro ao gerar PDF" });
   }
 };
+
+// ==================== RELATÓRIO DE ASSIDUIDADE ====================
+
+exports.relatorioAssiduidade = async function (req, res) {
+  try {
+    var { data_inicio, data_fim, colaborador_id, estado } = req.query;
+    var where = {};
+    if (data_inicio && data_fim) where.data = { [Op.between]: [data_inicio, data_fim] };
+    else if (data_inicio) where.data = { [Op.gte]: data_inicio };
+    else if (data_fim) where.data = { [Op.lte]: data_fim };
+    if (colaborador_id) where.colaborador_id = colaborador_id;
+    if (estado) where.estado = estado;
+
+    var registos = await RegistoPresenca.findAll({
+      where: where,
+      include: [incluirColaboradorDaOrg(req.organizacao_id, [
+        "id", "nome_completo", "numero_colaborador", "tipo_colaborador", "estado",
+        "data_admissao", "unidade_negocio",
+      ])],
+      order: [["data", "DESC"], ["hora_entrada", "DESC"]],
+      limit: 500,
+    });
+
+    var colab0 = registos.length > 0 && registos[0].colaborador ? registos[0].colaborador : null;
+    var org = await getOrganizacao(colab0);
+    if (!org && req.organizacao_id) {
+      org = await Organizacao.findByPk(req.organizacao_id);
+    }
+
+    var doc = new PDFDocument({ size: "A4", margin: 50, layout: "landscape" });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodeURIComponent("relatorio_assiduidade.pdf"));
+    doc.pipe(res);
+
+    var ml = 40;
+    var pw = doc.page.width;
+    var w = pw - 80;
+    var y = 50;
+
+    try {
+      var logoSrc = await getLogoSrc(org);
+      if (logoSrc) {
+        doc.image(logoSrc, pw / 2 - 22.5, y, { fit: [45, 45] });
+        y += 60;
+      }
+    } catch (e) {}
+
+    if (org && org.nome) {
+      doc.font("Helvetica-Bold").fontSize(15).fillColor("#1a1a1a");
+      doc.text(normalizeForPdf(org.nome), ml, y, { align: "center", width: w });
+      y += 22;
+    }
+
+    doc.font("Helvetica-Bold").fontSize(13).fillColor("#000000");
+    doc.text("Relatório de Assiduidade", ml, y, { align: "center", width: w });
+    y += 18;
+
+    doc.font("Helvetica").fontSize(9).fillColor("#555555");
+    doc.text("Gerado em " + getDataAtual(), ml, y, { align: "center", width: w });
+    y += 8;
+
+    var filtros = [];
+    if (data_inicio) filtros.push("De: " + data_inicio);
+    if (data_fim) filtros.push("Até: " + data_fim);
+    if (estado) filtros.push("Estado: " + estado);
+    if (colaborador_id) filtros.push("Colaborador: " + colaborador_id);
+    if (filtros.length > 0) {
+      doc.text("Filtros — " + filtros.join("  |  "), ml, y, { width: w, align: "center" });
+      y += 10;
+    }
+    y += 6;
+
+    var totalPresentes = 0, totalAusentes = 0, totalAtrasados = 0, totalOutros = 0;
+    registos.forEach(function (r) {
+      if (r.estado === "Presente") totalPresentes++;
+      else if (r.estado === "Ausente") totalAusentes++;
+      else if (r.estado === "Atrasado") totalAtrasados++;
+      else totalOutros++;
+    });
+
+    doc.font("Helvetica-Bold").fontSize(9).fillColor("#333333");
+    doc.text("Total de registos: " + registos.length + "  |  Presentes: " + totalPresentes + "  |  Ausentes: " + totalAusentes + "  |  Atrasados: " + totalAtrasados + "  |  Outros: " + totalOutros, ml, y, { width: w });
+    y += 16;
+
+    var colX = [ml, ml + 120, ml + 240, ml + 330, ml + 390, ml + 450, ml + 510, ml + 570];
+    var colW = [120, 90, 55, 55, 55, 55, 55, 55];
+    var headers = ["Colaborador", "N.º", "Data", "Entrada", "Saída", "Horas", "Estado", "Método"];
+
+    var desenharCabecalho = function (yy) {
+      doc.rect(ml, yy, w, 16).fill("#f2f2f2");
+      doc.fillColor("#333333").font("Helvetica-Bold").fontSize(8);
+      for (var h = 0; h < headers.length; h++) {
+        doc.text(headers[h], colX[h], yy + 4, { width: colW[h], lineBreak: false });
+      }
+      return yy + 16;
+    };
+
+    y = desenharCabecalho(y);
+    doc.font("Helvetica").fontSize(8).fillColor("#333333");
+
+    for (var i = 0; i < registos.length; i++) {
+      var r = registos[i];
+      if (y > doc.page.height - 50) {
+        doc.addPage();
+        y = 50;
+        y = desenharCabecalho(y);
+        doc.font("Helvetica").fontSize(8).fillColor("#333333");
+      }
+
+      var colab = r.colaborador || {};
+      var nome = normalizeForPdf(colab.nome_completo || "—");
+      if (nome.length > 28) nome = nome.slice(0, 26) + "…";
+      var numero = colab.numero_colaborador || "—";
+      var data = r.data ? helpersFormatDate(r.data) : "—";
+      var entrada = r.hora_entrada || "—";
+      var saida = r.hora_saida || "—";
+      var horas = r.horas_trabalhadas !== null ? r.horas_trabalhadas : "—";
+      var estadoTxt = r.estado || "—";
+      var metodo = r.metodo || "—";
+
+      doc.text(nome, colX[0], y + 3, { width: colW[0], lineBreak: false });
+      doc.text(numero, colX[1], y + 3, { width: colW[1], lineBreak: false });
+      doc.text(data, colX[2], y + 3, { width: colW[2], lineBreak: false });
+      doc.text(entrada, colX[3], y + 3, { width: colW[3], lineBreak: false });
+      doc.text(saida, colX[4], y + 3, { width: colW[4], lineBreak: false });
+      doc.text(horas, colX[5], y + 3, { width: colW[5], lineBreak: false });
+      doc.text(estadoTxt, colX[6], y + 3, { width: colW[6], lineBreak: false });
+      doc.text(metodo, colX[7], y + 3, { width: colW[7], lineBreak: false });
+
+      doc.moveTo(ml, y + 15).lineTo(ml + w, y + 15).strokeColor("#eeeeee").lineWidth(0.5).stroke();
+      doc.strokeColor("#000000");
+      y += 16;
+    }
+
+    if (registos.length === 0) {
+      doc.font("Helvetica").fontSize(10).fillColor("#777777");
+      doc.text("Nenhum registo de assiduidade encontrado com os filtros indicados.", ml, y + 12, { width: w, align: "center" });
+      y += 30;
+    }
+
+    drawFooter(doc, org);
+    doc.end();
+  } catch (e) {
+    console.log("Erro ao gerar relatório de assiduidade:", e.message);
+    return res.status(500).json({ error: "Erro ao gerar PDF" });
+  }
+};
+
+// ==================== RELATÓRIO DE POSIÇÕES ====================
+
+exports.relatorioPosicoes = async function (req, res) {
+  try {
+    var { tipo_colaborador, estado, unidade_negocio } = req.query;
+    var where = {};
+    if (tipo_colaborador) where.tipo_colaborador = tipo_colaborador;
+    if (estado) where.estado = estado;
+    if (unidade_negocio) where.unidade_negocio = unidade_negocio;
+
+    var colaboradores = await Colaborador.findAll({
+      where: where,
+      order: [["nome_completo", "ASC"]],
+      limit: 500,
+    });
+
+    var org = null;
+    if (colaboradores.length > 0 && colaboradores[0].organizacao_id) {
+      org = await Organizacao.findByPk(colaboradores[0].organizacao_id);
+    }
+    if (!org && req.organizacao_id) {
+      org = await Organizacao.findByPk(req.organizacao_id);
+    }
+
+    var doc = new PDFDocument({ size: "A4", margin: 50, layout: "landscape" });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodeURIComponent("relatorio_posicoes.pdf"));
+    doc.pipe(res);
+
+    var ml = 40;
+    var pw = doc.page.width;
+    var w = pw - 80;
+    var y = 50;
+
+    try {
+      var logoSrc = await getLogoSrc(org);
+      if (logoSrc) {
+        doc.image(logoSrc, pw / 2 - 22.5, y, { fit: [45, 45] });
+        y += 60;
+      }
+    } catch (e) {}
+
+    if (org && org.nome) {
+      doc.font("Helvetica-Bold").fontSize(15).fillColor("#1a1a1a");
+      doc.text(normalizeForPdf(org.nome), ml, y, { align: "center", width: w });
+      y += 22;
+    }
+
+    doc.font("Helvetica-Bold").fontSize(13).fillColor("#000000");
+    doc.text("Relatório de Posições", ml, y, { align: "center", width: w });
+    y += 18;
+
+    doc.font("Helvetica").fontSize(9).fillColor("#555555");
+    doc.text("Gerado em " + getDataAtual(), ml, y, { align: "center", width: w });
+    y += 8;
+
+    var filtros = [];
+    if (tipo_colaborador) filtros.push("Tipo: " + tipo_colaborador);
+    if (estado) filtros.push("Estado: " + estado);
+    if (unidade_negocio) filtros.push("Unidade: " + unidade_negocio);
+    if (filtros.length > 0) {
+      doc.text("Filtros — " + filtros.join("  |  "), ml, y, { width: w, align: "center" });
+      y += 10;
+    }
+    y += 6;
+
+    var porTipo = {};
+    colaboradores.forEach(function (c) {
+      var t = c.tipo_colaborador || "Não definido";
+      porTipo[t] = (porTipo[t] || 0) + 1;
+    });
+    var resumo = ["Total de colaboradores: " + colaboradores.length];
+    Object.keys(porTipo).forEach(function (t) {
+      resumo.push(t + ": " + porTipo[t]);
+    });
+    doc.font("Helvetica-Bold").fontSize(9).fillColor("#333333");
+    doc.text(resumo.join("  |  "), ml, y, { width: w });
+    y += 16;
+
+    var colX = [ml, ml + 130, ml + 280, ml + 380, ml + 460, ml + 540];
+    var colW = [130, 100, 100, 80, 80, 80];
+    var headers = ["Nome Completo", "N.º Colaborador", "Tipo / Posição", "Estado", "Admissão", "Unidade"];
+
+    var desenharCabecalho = function (yy) {
+      doc.rect(ml, yy, w, 16).fill("#f2f2f2");
+      doc.fillColor("#333333").font("Helvetica-Bold").fontSize(8);
+      for (var h = 0; h < headers.length; h++) {
+        doc.text(headers[h], colX[h], yy + 4, { width: colW[h], lineBreak: false });
+      }
+      return yy + 16;
+    };
+
+    y = desenharCabecalho(y);
+    doc.font("Helvetica").fontSize(8).fillColor("#333333");
+
+    for (var i = 0; i < colaboradores.length; i++) {
+      var c = colaboradores[i];
+      if (y > doc.page.height - 50) {
+        doc.addPage();
+        y = 50;
+        y = desenharCabecalho(y);
+        doc.font("Helvetica").fontSize(8).fillColor("#333333");
+      }
+
+      var nome = normalizeForPdf(c.nome_completo || "—");
+      if (nome.length > 30) nome = nome.slice(0, 28) + "…";
+      var numero = c.numero_colaborador || "—";
+      var tipo = c.tipo_colaborador || "—";
+      var est = c.estado || "—";
+      var admissao = c.data_admissao ? helpersFormatDate(c.data_admissao) : "—";
+      var unidade = c.unidade_negocio || "—";
+
+      doc.text(nome, colX[0], y + 3, { width: colW[0], lineBreak: false });
+      doc.text(numero, colX[1], y + 3, { width: colW[1], lineBreak: false });
+      doc.text(tipo, colX[2], y + 3, { width: colW[2], lineBreak: false });
+      doc.text(est, colX[3], y + 3, { width: colW[3], lineBreak: false });
+      doc.text(admissao, colX[4], y + 3, { width: colW[4], lineBreak: false });
+      doc.text(unidade, colX[5], y + 3, { width: colW[5], lineBreak: false });
+
+      doc.moveTo(ml, y + 15).lineTo(ml + w, y + 15).strokeColor("#eeeeee").lineWidth(0.5).stroke();
+      doc.strokeColor("#000000");
+      y += 16;
+    }
+
+    if (colaboradores.length === 0) {
+      doc.font("Helvetica").fontSize(10).fillColor("#777777");
+      doc.text("Nenhuma posição encontrada com os filtros indicados.", ml, y + 12, { width: w, align: "center" });
+      y += 30;
+    }
+
+    drawFooter(doc, org);
+    doc.end();
+  } catch (e) {
+    console.log("Erro ao gerar relatório de posições:", e.message);
+    return res.status(500).json({ error: "Erro ao gerar PDF" });
+  }
+};
+
+function helpersFormatDate(d) {
+  if (!d) return "—";
+  var dt = new Date(d + "T00:00:00");
+  var MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+  return dt.getDate() + " de " + MESES[dt.getMonth()] + " de " + dt.getFullYear();
+}

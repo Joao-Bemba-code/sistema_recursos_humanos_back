@@ -12,6 +12,7 @@ router.get("/", requireModulo("colaboradores", "read", "Administrador Geral", "D
 router.get("/:id/documentos", requireModulo("documentos_colaborador", "read"), documentoController.list);
 router.post("/:id/documentos", requireModulo("documentos_colaborador", "create"), documentoController.create);
 router.get("/:id/documentos/:docId/ficheiro", requireModulo("documentos_colaborador", "read"), documentoController.ficheiro);
+router.get("/:id/documentos/:docId/download", requireModulo("documentos_colaborador", "read"), documentoController.download);
 router.put("/:id/documentos/:docId", requireModulo("documentos_colaborador", "update"), documentoController.update);
 router.delete("/:id/documentos/:docId", requireModulo("documentos_colaborador", "delete"), documentoController.remove);
 router.get("/:id", requireModulo("colaboradores", "read", "Administrador Geral", "Director Geral", "Director de Recursos Humanos", "Técnico de RH"), colaboradorController.getById);

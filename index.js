@@ -50,6 +50,8 @@ var escalaRoutes = require("./routers/escalas");
 var ficheiroRoutes = require("./routers/ficheiros");
 var tarefaRoutes = require("./routers/tarefas");
 var chatRoutes = require("./routers/chat");
+var atividadeRoutes = require("./routers/atividade");
+var mapaAssiduidadeRoutes = require("./routers/mapaAssiduidade");
 
 // CORREÇÃO: Importação protegida do módulo seed para evitar o crash MODULE_NOT_FOUND
 var seed = null;
@@ -177,6 +179,8 @@ app.use("/api/ficheiros", ficheiroRoutes);
 app.use("/api/tarefas", authenticate, tarefaRoutes);
 app.use("/api/chat", authenticate, chatRoutes);
 app.use("/api/chat/chamadas", authenticate, require("./routers/chamadas"));
+app.use("/api/atividades", authenticate, atividadeRoutes);
+app.use("/api/mapa-assiduidade", authenticate, mapaAssiduidadeRoutes);
 
 // Health check
 app.get("/health", function (req, res) {
@@ -233,8 +237,12 @@ app.listen(port, async function () {
   console.log(" Server on porta " + port);
   console.log("=================================");
 
+  // As migracoes correm sempre que o index arranca (deploy incluido).
+  // Sao idempotentes: so acrescentam colunas/indices que ainda nao existem.
+  console.log(" A executar migracoes automaticas no arranque...");
   try {
     await migrations();
+    console.log(" Migracoes automaticas concluidas!");
   } catch (e) {
     console.log(" Erro nas migracoes (continuando):", e.message);
   }
