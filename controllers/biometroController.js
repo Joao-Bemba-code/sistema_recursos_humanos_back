@@ -33,7 +33,7 @@ if (isNaN(MINUTOS_SAIDA) || MINUTOS_SAIDA < 1) MINUTOS_SAIDA = 60;
 var JANELA_ENTRADA_ANTES = 6 * 60;
 // Marcador de versao devolvido nas respostas da API. Permite confirmar (num
 // deploy em producao) que a versao com escalas/turnos ja esta activa.
-var VERSAO_ALGORITMO = "escalas-4-almoco";
+var VERSAO_ALGORITMO = "escalas-4-almoco-dias-uteis";
 
 // A contagem de assiduidade DESTES ids comeca no dia da primeira picagem de
 // cada um: foram cadastrados no aparelho sexta 6/11, depois de a janela de
@@ -285,8 +285,23 @@ var alertarAtraso = async function (registo, colab) {
 // gravados — o comportamento antigo (so entrada/saida) fica intacto.
 var JANELA_ALMOCO = 3 * 60;
 
+// O almoco das 12:00/13:00 e' horario de DIAS UTEIS: sabado e domingo nao
+// recebem horario de almoco automatico pela ponte. A data chega como
+// "YYYY-MM-DD" local. Sem data conhecida, mantem-se o comportamento anterior.
+var ehDiaUtil = function (dataStr) {
+  var partes = typeof dataStr === "string" ? /^(\d{4})-(\d{2})-(\d{2})/.exec(dataStr) : null;
+  if (!partes) return true;
+  var diaSemana = new Date(
+    parseInt(partes[1], 10), parseInt(partes[2], 10) - 1, parseInt(partes[3], 10)
+  ).getDay();
+  return diaSemana >= 1 && diaSemana <= 5;
+};
+
 var atribuirAlmoco = function (entrada, saida, lista, escala, dataStr, offsetSaida, saidaActual, entradaActual) {
   var resultado = { saida_almoco: saidaActual || null, entrada_almoco: entradaActual || null };
+  // Fim de semana: nao ha almoco automatico. Nao apaga nada que ja esteja
+  // gravado (por exemplo, um ajuste feito à mão no painel).
+  if (!ehDiaUtil(dataStr)) return resultado;
   // Turnos nocturnos nao tem o padrao almoco 12/13 — nao se mexe neles.
   if (!entrada || turnoNocturno(escala)) return resultado;
   var mEntrada = paraMinutos(entrada);

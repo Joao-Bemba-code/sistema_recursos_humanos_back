@@ -8,18 +8,23 @@ var {
   HORARIO_ENTRADA_ALMOCO,
 } = require("../controllers/biometroController");
 
-var DATA = "2026-11-28";
+var DATA = "2026-11-27"; // sexta-feira (o almoco e' so de segunda a sexta)
 var escalaPadrao = { entrada: "08:00", saida: "16:00" };
 
 // Picagens como a ponte envia: ordenadas, com hora HH:MM:SS e data local.
-var picagens = function (horas) {
+var picagens = function (horas, data) {
+  var dia = data || DATA;
+  var partesData = dia.split("-").map(Number);
   return horas.map(function (h) {
     var partes = h.split(":");
     return {
       hora: h + ":00",
       tipo: 1,
-      dataStr: DATA,
-      ts: new Date(2026, 10, 28, parseInt(partes[0], 10), parseInt(partes[1], 10), 0),
+      dataStr: dia,
+      ts: new Date(
+        partesData[0], partesData[1] - 1, partesData[2],
+        parseInt(partes[0], 10), parseInt(partes[1], 10), 0
+      ),
     };
   });
 };
@@ -81,4 +86,44 @@ test("turno nocturno nao recebe horario de almoco automatico", function () {
   var r = atribuirAlmoco("20:00:00", "04:00:00", picagens(["00:00", "02:00"]), escalaNocturna, DATA, 1440, null, null);
   assert.equal(r.saida_almoco, null);
   assert.equal(r.entrada_almoco, null);
+});
+
+test("sabado nao recebe horario de almoco (mesmo com 4 picagens)", function () {
+  var sabado = "2026-11-28";
+  var r = atribuirHorarios(
+    null, null, picagens(["08:00", "12:00", "13:00", "16:00"], sabado), escalaPadrao, sabado
+  );
+  assert.equal(r.entrada, "08:00:00");
+  assert.equal(r.saida, "16:00:00");
+  assert.equal(r.saida_almoco, null);
+  assert.equal(r.entrada_almoco, null);
+  assert.equal(calcularHorasTrabalhadas(r.entrada, r.saida), 8);
+});
+
+test("domingo nao recebe horario de almoco (mesmo com 4 picagens)", function () {
+  var domingo = "2026-11-29";
+  var r = atribuirHorarios(
+    null, null, picagens(["08:00", "12:00", "13:00", "16:00"], domingo), escalaPadrao, domingo
+  );
+  assert.equal(r.saida_almoco, null);
+  assert.equal(r.entrada_almoco, null);
+});
+
+test("segunda-feira volta a ter almoco automatico", function () {
+  var segunda = "2026-11-30";
+  var r = atribuirHorarios(
+    null, null, picagens(["08:00", "12:00", "13:00", "16:00"], segunda), escalaPadrao, segunda
+  );
+  assert.equal(r.saida_almoco, "12:00:00");
+  assert.equal(r.entrada_almoco, "13:00:00");
+});
+
+test("fim de semana nao apaga horarios de almoco ja gravados", function () {
+  var sabado = "2026-11-28";
+  var r = atribuirHorarios(
+    "08:00:00", "16:00:00", picagens(["08:00", "12:00", "13:00", "16:00"], sabado),
+    escalaPadrao, sabado, "11:55:00", "13:05:00"
+  );
+  assert.equal(r.saida_almoco, "11:55:00");
+  assert.equal(r.entrada_almoco, "13:05:00");
 });
