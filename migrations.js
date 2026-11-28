@@ -187,6 +187,9 @@ var migrations = async function () {
     await adicionarColuna("registos_presenca", "processada_ano", "INT NULL");
     // Registo corrigido a mao pelo RH: o biometro deixa de mexer nele
     await adicionarColuna("registos_presenca", "ajustado_manual", "BOOLEAN NOT NULL DEFAULT false");
+    // Horarios do almoco (apenas registo; nao alteram horas_trabalhadas)
+    await adicionarColuna("registos_presenca", "hora_saida_almoco", "TIME NULL");
+    await adicionarColuna("registos_presenca", "hora_entrada_almoco", "TIME NULL");
 
     // ENUM 'estado': acrescenta 'Em_Curso' (dia a decorrer, ainda sem hora de saida)
     try {

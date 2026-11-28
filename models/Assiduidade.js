@@ -19,6 +19,16 @@ var RegistoPresenca = sequelize.define("RegistoPresenca", {
     type: DataTypes.TIME,
     allowNull: true,
   },
+  // Horarios do almoco: apenas registo. NAO sao descontados de horas_trabalhadas
+  // (a jornada continua a ser calculada entre hora_entrada e hora_saida).
+  hora_saida_almoco: {
+    type: DataTypes.TIME,
+    allowNull: true,
+  },
+  hora_entrada_almoco: {
+    type: DataTypes.TIME,
+    allowNull: true,
+  },
   horas_trabalhadas: {
     type: DataTypes.DECIMAL(5, 2),
     allowNull: true,

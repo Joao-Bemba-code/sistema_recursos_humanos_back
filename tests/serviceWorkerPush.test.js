@@ -21,7 +21,12 @@ function carregarServiceWorker() {
     addEventListener: function (nome, handler) { eventos[nome] = handler; },
   };
 
-  var ficheiro = path.resolve(__dirname, "../../sistema_recursos_humanos_front/public/sw.js");
+  // O nome da pasta do frontend varia entre maquinas (com/sem "s" em "recurso").
+  var candidatos = [
+    path.resolve(__dirname, "../../sistema_recursos_humanos_front/public/sw.js"),
+    path.resolve(__dirname, "../../sistema_recurso_humanos/public/sw.js"),
+  ];
+  var ficheiro = candidatos.find(function (caminho) { return fs.existsSync(caminho); }) || candidatos[0];
   vm.runInNewContext(fs.readFileSync(ficheiro, "utf8"), {
     self: selfFalso,
     URL: URL,

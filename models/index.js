@@ -369,6 +369,15 @@ var syncDatabase = async () => {
         await sequelize.query("ALTER TABLE `registos_presenca` ADD COLUMN `ajustado_manual` BOOLEAN NOT NULL DEFAULT false");
         console.log(" Coluna 'ajustado_manual' adicionada!");
       }
+      // Horarios do almoco: apenas registo, nao descontam de horas_trabalhadas
+      if (nomesColunas.indexOf("hora_saida_almoco") === -1) {
+        await sequelize.query("ALTER TABLE `registos_presenca` ADD COLUMN `hora_saida_almoco` TIME NULL");
+        console.log(" Coluna 'hora_saida_almoco' adicionada!");
+      }
+      if (nomesColunas.indexOf("hora_entrada_almoco") === -1) {
+        await sequelize.query("ALTER TABLE `registos_presenca` ADD COLUMN `hora_entrada_almoco` TIME NULL");
+        console.log(" Coluna 'hora_entrada_almoco' adicionada!");
+      }
       // ENUM de estados: acrescenta 'Em_Curso' (dia a decorrer, ainda sem hora de saida)
       var rEstado = await sequelize.query("SHOW COLUMNS FROM `registos_presenca` LIKE 'estado'");
       var linhasEstado = Array.isArray(rEstado[0]) ? rEstado[0] : rEstado;

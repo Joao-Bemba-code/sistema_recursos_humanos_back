@@ -15,6 +15,11 @@ var notificacaoController = require("./notificacaoController");
 // estado e "Em_Curso" — nao e Presente nem Atrasado, porque ainda pode mudar.
 var HORARIO_ENTRADA = (process.env.HORARIO_ENTRADA || "08:00").slice(0, 5);
 var HORARIO_SAIDA = (process.env.HORARIO_SAIDA || "16:00").slice(0, 5);
+// Almoco: saida as 12:00 e volta as 13:00. Configuravel por env, com os valores
+// pedidos para o SGHR. Estes horarios NAO sao descontados de horas_trabalhadas:
+// servem apenas para identificar/gravar as picagens do meio do dia.
+var HORARIO_SAIDA_ALMOCO = (process.env.HORARIO_SAIDA_ALMOCO || "12:00").slice(0, 5);
+var HORARIO_ENTRADA_ALMOCO = (process.env.HORARIO_ENTRADA_ALMOCO || "13:00").slice(0, 5);
 var TOLERANCIA_MINUTOS = parseInt(process.env.TOLERANCIA_ENTRADA || "15", 10);
 if (isNaN(TOLERANCIA_MINUTOS) || TOLERANCIA_MINUTOS < 0) TOLERANCIA_MINUTOS = 15;
 // Separacao minima (minutos) entre a entrada e a seguinte picagem para essa
@@ -28,7 +33,7 @@ if (isNaN(MINUTOS_SAIDA) || MINUTOS_SAIDA < 1) MINUTOS_SAIDA = 60;
 var JANELA_ENTRADA_ANTES = 6 * 60;
 // Marcador de versao devolvido nas respostas da API. Permite confirmar (num
 // deploy em producao) que a versao com escalas/turnos ja esta activa.
-var VERSAO_ALGORITMO = "escalas-3";
+var VERSAO_ALGORITMO = "escalas-4-almoco";
 
 // A contagem de assiduidade DESTES ids comeca no dia da primeira picagem de
 // cada um: foram cadastrados no aparelho sexta 6/11, depois de a janela de
@@ -88,7 +93,12 @@ var diasDescansoDoColaborador = function (texto) {
 var escalaFallback = function (colab, diaSemana) {
   var descanso = diasDescansoDoColaborador(colab.dias_descanso);
   if (descanso[diaSemana]) return null;
-  return { entrada: HORARIO_ENTRADA, saida: HORARIO_SAIDA };
+  return {
+    entrada: HORARIO_ENTRADA,
+    saida: HORARIO_SAIDA,
+    saida_almoco: HORARIO_SAIDA_ALMOCO,
+    entrada_almoco: HORARIO_ENTRADA_ALMOCO,
+  };
 };
 
 // Horario do colaborador para um dia da semana (0=domingo ... 6=sabado):
@@ -99,7 +109,12 @@ var escalaDoDia = function (colab, mapaEscalas, diaSemana) {
   if (linhas && Object.keys(linhas).length > 0) {
     var linha = linhas[diaSemana];
     if (!linha || (!linha.hora_entrada && !linha.hora_saida)) return null;
-    return { entrada: linha.hora_entrada, saida: linha.hora_saida };
+    return {
+      entrada: linha.hora_entrada,
+      saida: linha.hora_saida,
+      saida_almoco: linha.hora_saida_almoco || HORARIO_SAIDA_ALMOCO,
+      entrada_almoco: linha.hora_entrada_almoco || HORARIO_ENTRADA_ALMOCO,
+    };
   }
   return escalaFallback(colab, diaSemana);
 };
@@ -264,7 +279,72 @@ var alertarAtraso = async function (registo, colab) {
 // seguinte (antes das 12:00): essas contam como saida, nunca como entrada.
 // NOTA: o tipo do aparelho (0=entrada, 1=saida) NAO e' usado — nos ZKTeco
 // testados devolve sempre 1, mesmo nas picagens de entrada da manha.
-var atribuirHorarios = function (entradaActual, saidaActual, picagens, escala, dataStr) {
+// Picagens do almoco (saida 12:00 / volta 13:00). So aceita picagens dentro de
+// JANELA_ALMOCO do horario esperado, para uma picagem isolada (ex.: 10:00) nao
+// virar "almoco" por engano. Se nao houver candidatos, mantem os valores ja
+// gravados — o comportamento antigo (so entrada/saida) fica intacto.
+var JANELA_ALMOCO = 3 * 60;
+
+var atribuirAlmoco = function (entrada, saida, lista, escala, dataStr, offsetSaida, saidaActual, entradaActual) {
+  var resultado = { saida_almoco: saidaActual || null, entrada_almoco: entradaActual || null };
+  // Turnos nocturnos nao tem o padrao almoco 12/13 — nao se mexe neles.
+  if (!entrada || turnoNocturno(escala)) return resultado;
+  var mEntrada = paraMinutos(entrada);
+  var mSaida = saida ? paraMinutos(saida) + (offsetSaida || 0) : null;
+  if (mEntrada === null || mSaida === null || mSaida <= mEntrada) return resultado;
+  var esperadaSaida = paraMinutos((escala && escala.saida_almoco) || HORARIO_SAIDA_ALMOCO);
+  var esperadaEntrada = paraMinutos((escala && escala.entrada_almoco) || HORARIO_ENTRADA_ALMOCO);
+  if (esperadaSaida === null || esperadaEntrada === null) return resultado;
+
+  var candidatos = [];
+  for (var i = 0; i < lista.length; i++) {
+    var p = lista[i];
+    var m = paraMinutos(p.hora);
+    if (m === null) continue;
+    var off = (p.dataStr && dataStr && p.dataStr > dataStr) ? 1440 : 0;
+    var eff = m + off;
+    if (eff <= mEntrada || eff >= mSaida) continue;
+    if (Math.abs(eff - esperadaSaida) > JANELA_ALMOCO && Math.abs(eff - esperadaEntrada) > JANELA_ALMOCO) continue;
+    candidatos.push({ minutos: eff, hora: p.hora });
+  }
+  if (candidatos.length === 0) return resultado;
+
+  candidatos.sort(function (a, b) { return a.minutos - b.minutos; });
+  var unicos = [];
+  for (var c = 0; c < candidatos.length; c++) {
+    if (unicos.length === 0 || candidatos[c].minutos - unicos[unicos.length - 1].minutos >= 2) {
+      unicos.push(candidatos[c]);
+    }
+  }
+
+  var melhorSaida = -1;
+  var melhorDist = Infinity;
+  for (var s = 0; s < unicos.length; s++) {
+    var dist = Math.abs(unicos[s].minutos - esperadaSaida);
+    if (dist < melhorDist) { melhorDist = dist; melhorSaida = s; }
+  }
+  if (melhorSaida === -1 || melhorDist > JANELA_ALMOCO) return resultado;
+  resultado.saida_almoco = unicos[melhorSaida].hora;
+
+  if (unicos.length >= 2) {
+    var melhorVolta = -1;
+    melhorDist = Infinity;
+    for (var v = melhorSaida + 1; v < unicos.length; v++) {
+      var dv = Math.abs(unicos[v].minutos - esperadaEntrada);
+      if (dv < melhorDist) { melhorDist = dv; melhorVolta = v; }
+    }
+    if (melhorVolta !== -1 && melhorDist <= JANELA_ALMOCO) {
+      resultado.entrada_almoco = unicos[melhorVolta].hora;
+    }
+  } else if (Math.abs(unicos[0].minutos - esperadaEntrada) < Math.abs(unicos[0].minutos - esperadaSaida)) {
+    // Uma unica picagem, mais perto das 13:00: e' a volta do almoco.
+    resultado.saida_almoco = null;
+    resultado.entrada_almoco = unicos[0].hora;
+  }
+  return resultado;
+};
+
+var atribuirHorarios = function (entradaActual, saidaActual, picagens, escala, dataStr, saidaAlmocoActual, entradaAlmocoActual) {
   var entrada = entradaActual || null;
   var saida = saidaActual || null;
 
@@ -323,7 +403,17 @@ var atribuirHorarios = function (entradaActual, saidaActual, picagens, escala, d
     }
   }
 
-  return { entrada: entrada, saida: saida };
+  var almoco = atribuirAlmoco(
+    entrada, saida, lista, escala, dataStr, offsetSaida,
+    saidaAlmocoActual, entradaAlmocoActual
+  );
+
+  return {
+    entrada: entrada,
+    saida: saida,
+    saida_almoco: almoco.saida_almoco,
+    entrada_almoco: almoco.entrada_almoco,
+  };
 };
 
 
@@ -568,13 +658,15 @@ var sincronizar = async function (req, res) {
         where: { colaborador_id: grupo.colab.id, data: grupo.data },
       });
 
-      // Entrada e saida do dia, juntando as picagens novas com o que ja existe
+      // Entrada, almoco e saida do dia, juntando as picagens novas com o que ja existe
       var horarios = atribuirHorarios(
         existente ? existente.hora_entrada : null,
         existente ? existente.hora_saida : null,
         picagensOrdenadas,
         escalaGrupo,
-        grupo.data
+        grupo.data,
+        existente ? existente.hora_saida_almoco : null,
+        existente ? existente.hora_entrada_almoco : null
       );
       var entrada = horarios.entrada;
       var saida = horarios.saida;
@@ -592,6 +684,8 @@ var sincronizar = async function (req, res) {
           data: grupo.data,
           hora_entrada: entrada,
           hora_saida: saida,
+          hora_saida_almoco: horarios.saida_almoco,
+          hora_entrada_almoco: horarios.entrada_almoco,
           horas_trabalhadas: calcularHorasTrabalhadas(entrada, saida),
           horas_extras: 0,
           estado: classificarEstado(entrada, !!saida, grupo.data, escalaGrupo),
@@ -628,6 +722,8 @@ var sincronizar = async function (req, res) {
         await existente.update({
           hora_entrada: entrada,
           hora_saida: saida,
+          hora_saida_almoco: horarios.saida_almoco,
+          hora_entrada_almoco: horarios.entrada_almoco,
           horas_trabalhadas: calcularHorasTrabalhadas(entrada, saida),
           metodo: existente.metodo === "Biometrico" ? "Biometrico" : existente.metodo,
           estado: novoEstado,
@@ -848,7 +944,7 @@ var reclassificarAutomaticos = async function (desdeStr) {
   var mapaEscalas = await carregarMapaEscalas(cols);
 
   var registos = await RegistoPresenca.findAll({
-    attributes: ["id", "colaborador_id", "data", "hora_entrada", "hora_saida", "horas_trabalhadas", "estado", "observacoes", "processada"],
+    attributes: ["id", "colaborador_id", "data", "hora_entrada", "hora_saida", "hora_saida_almoco", "hora_entrada_almoco", "horas_trabalhadas", "estado", "observacoes", "processada"],
     where: {
       metodo: "Biometrico",
       ajustado_manual: { [Op.or]: [false, null] },
@@ -929,7 +1025,7 @@ var reclassificarAutomaticos = async function (desdeStr) {
       }
     }
 
-    var horariosNovos = atribuirHorarios(null, null, lista, escala, dataStr);
+    var horariosNovos = atribuirHorarios(null, null, lista, escala, dataStr, null, null);
     if (!horariosNovos.entrada) continue;
 
     try {
@@ -938,6 +1034,8 @@ var reclassificarAutomaticos = async function (desdeStr) {
         data: dataStr,
         hora_entrada: horariosNovos.entrada,
         hora_saida: horariosNovos.saida,
+        hora_saida_almoco: horariosNovos.saida_almoco,
+        hora_entrada_almoco: horariosNovos.entrada_almoco,
         horas_trabalhadas: calcularHorasTrabalhadas(horariosNovos.entrada, horariosNovos.saida),
         horas_extras: 0,
         estado: classificarEstado(horariosNovos.entrada, !!horariosNovos.saida, dataStr, escala),
@@ -983,7 +1081,9 @@ var reclassificarAutomaticos = async function (desdeStr) {
       registo.hora_saida,
       listaPicagens,
       escala,
-      data
+      data,
+      registo.hora_saida_almoco,
+      registo.hora_entrada_almoco
     );
     var entrada = horarios.entrada;
     var saida = horarios.saida;
@@ -1003,6 +1103,8 @@ var reclassificarAutomaticos = async function (desdeStr) {
       novaObs === registo.observacoes &&
       horaTexto(entrada) === horaTexto(registo.hora_entrada) &&
       horaTexto(saida) === horaTexto(registo.hora_saida) &&
+      horaTexto(horarios.saida_almoco) === horaTexto(registo.hora_saida_almoco) &&
+      horaTexto(horarios.entrada_almoco) === horaTexto(registo.hora_entrada_almoco) &&
       mesmasHoras(novasHoras, registo.horas_trabalhadas)
     ) {
       continue;
@@ -1010,6 +1112,8 @@ var reclassificarAutomaticos = async function (desdeStr) {
     await registo.update({
       hora_entrada: entrada,
       hora_saida: saida,
+      hora_saida_almoco: horarios.saida_almoco,
+      hora_entrada_almoco: horarios.entrada_almoco,
       horas_trabalhadas: novasHoras,
       estado: novoEstado,
       observacoes: novaObs,
@@ -1125,5 +1229,10 @@ module.exports = {
   paraMinutos,
   classificarEstado,
   observacaoAutomatica,
+  atribuirHorarios,
+  atribuirAlmoco,
+  calcularHorasTrabalhadas,
   TOLERANCIA_MINUTOS,
+  HORARIO_SAIDA_ALMOCO,
+  HORARIO_ENTRADA_ALMOCO,
 };

@@ -9,7 +9,8 @@ var METODOS_VALIDOS = ["Manual", "Biometrico", "GPS", "QR_Code"];
 
 // Campos que o utilizador pode gravar (o resto e interno: processada, ajustado_manual...)
 var CAMPOS_EDITAVEIS = [
-  "colaborador_id", "data", "hora_entrada", "hora_saida", "estado", "metodo", "observacoes",
+  "colaborador_id", "data", "hora_entrada", "hora_saida", "hora_saida_almoco", "hora_entrada_almoco",
+  "estado", "metodo", "observacoes",
   "justificado", "justificacao_observacoes", "documento_justificacao",
 ];
 
