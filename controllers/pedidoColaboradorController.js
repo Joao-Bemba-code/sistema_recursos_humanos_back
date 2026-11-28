@@ -1,8 +1,18 @@
 var { Op } = require("sequelize");
-var { PedidoColaborador, Colaborador, Utilizador, Perfil, Notificacao, RegistoPresenca } = require("../models");
+var { PedidoColaborador, Colaborador, Utilizador, Perfil, Notificacao, RegistoPresenca, Credito } = require("../models");
 var notificacaoController = require("./notificacaoController");
 var { justificarDispensa } = require("../helpers/bancoHoras");
+var { avaliarElegibilidadeCredito } = require("../helpers/elegibilidadeCredito");
 var { guardarFicheiro, urlDoFicheiro, apagarFicheiroDeUrl, responderComFicheiro } = require("../helpers/ficheiros");
+var { obterIdsResponsaveis } = require("../helpers/responsaveisPedido");
+
+var dadosDoPedido = function (pedido) {
+  if (!pedido || !pedido.dados) return {};
+  if (typeof pedido.dados === "string") {
+    try { return JSON.parse(pedido.dados); } catch (e) { return {}; }
+  }
+  return pedido.dados;
+};
 
 var list = async function (req, res) {
   try {
@@ -154,6 +164,26 @@ var create = async function (req, res) {
       try { dadosParsed = JSON.parse(dadosParsed); } catch (e) { dadosParsed = { raw: dadosParsed }; }
     }
 
+    if (dados.tipo === "credito") {
+      var elegibilidade = await avaliarElegibilidadeCredito(colaborador.id, {
+        valor: dadosParsed && dadosParsed.valor,
+        parcelas: dadosParsed && dadosParsed.parcelas,
+      });
+      if (!elegibilidade.elegivel) {
+        return res.status(400).json({
+          error: "Pedido de crédito não elegível",
+          motivos: elegibilidade.motivos,
+          dados: elegibilidade,
+        });
+      }
+      dadosParsed = Object.assign({}, dadosParsed, {
+        elegibilidade: elegibilidade,
+        prestacao_mensal: elegibilidade.prestacao_mensal,
+        parcelas: elegibilidade.parcelas,
+        valor: elegibilidade.valor_solicitado,
+      });
+    }
+
     var pedido = await PedidoColaborador.create({
       organizacao_id: req.utilizador.organizacao_id,
       colaborador_id: colaborador.id,
@@ -181,6 +211,34 @@ var create = async function (req, res) {
     });
 
     try {
+      var tipoLabels = { ferias: "Férias", adiantamento: "Adiantamento", justificacao: "Justificação", aumento: "Aumento", dispensa: "Dispensa", licenca: "Licença", credito: "Crédito", outro: "Outro" };
+      var tipoNome = tipoLabels[pedido.tipo] || pedido.tipo;
+      var notificados = {};
+
+      function avisar(utilizadorId, titulo, mensagem, link, tipo) {
+        if (!utilizadorId || notificados[utilizadorId]) return;
+        notificados[utilizadorId] = true;
+        return notificacaoController.create({
+          organizacao_id: req.utilizador.organizacao_id,
+          utilizador_id: utilizadorId,
+          titulo: titulo,
+          mensagem: mensagem,
+          tipo: tipo || "info",
+          link: link,
+          modulo: "pedidos",
+        });
+      }
+
+      // Confirmacao para quem submeteu o pedido.
+      await avisar(
+        colaborador.utilizador_id,
+        "Pedido submetido",
+        "O seu pedido de " + tipoNome + " foi recebido e está Em análise.",
+        "/dashboard/portal",
+        "success"
+      );
+
+      // RH e administradores da mesma organizacao.
       var adminPerfis = ["Administrador Geral", "Director Geral", "Director de Recursos Humanos", "Técnico de RH"];
       var adminPerfisRows = await Perfil.findAll({
         where: { nome: { [Op.in]: adminPerfis } },
@@ -190,21 +248,30 @@ var create = async function (req, res) {
         var admins = await Utilizador.findAll({
           where: { perfil_id: { [Op.in]: adminPerfilIds }, organizacao_id: req.utilizador.organizacao_id },
         });
-        var tipoLabels = { ferias: "Férias", adiantamento: "Adiantamento", justificacao: "Justificação", aumento: "Aumento", dispensa: "Dispensa", licenca: "Licença", outro: "Outro" };
         for (var i = 0; i < admins.length; i++) {
-          await notificacaoController.create({
-            organizacao_id: req.utilizador.organizacao_id,
-            utilizador_id: admins[i].id,
-            titulo: "Novo Pedido",
-            mensagem: colaborador.nome_completo + " submeteu um pedido de " + (tipoLabels[pedido.tipo] || pedido.tipo) + ": " + pedido.titulo,
-            tipo: "info",
-            link: "/dashboard/pedidos",
-            modulo: "pedidos",
-          });
+          await avisar(
+            admins[i].id,
+            "Novo Pedido",
+            colaborador.nome_completo + " submeteu um pedido de " + tipoNome + ": " + pedido.titulo,
+            "/dashboard/pedidos",
+            "info"
+          );
         }
       }
+
+      // Supervisores/responsaveis da unidade, seccao e departamento do colaborador.
+      var responsaveis = await obterIdsResponsaveis(colaborador, req.utilizador.organizacao_id);
+      for (var j = 0; j < responsaveis.length; j++) {
+        await avisar(
+          responsaveis[j],
+          "Novo Pedido na equipa",
+          colaborador.nome_completo + " submeteu um pedido de " + tipoNome + ": " + pedido.titulo + ". Verifique em Em análise.",
+          "/dashboard/pedidos",
+          "warning"
+        );
+      }
     } catch (notifErr) {
-      console.log("Aviso: nao foi possivel criar notificacao para admins:", notifErr.message);
+      console.log("Aviso: nao foi possivel criar notificacoes do pedido:", notifErr.message);
     }
 
     return res.status(201).json({
@@ -260,7 +327,76 @@ var updateEstado = async function (req, res) {
       dadosEstado.comentario = req.body.comentario || null;
     }
 
+    if (pedido.tipo === "credito") {
+      var dadosCredito = dadosDoPedido(pedido);
+      var alteracoesCredito = req.body.dadosCredito || null;
+      if (alteracoesCredito && (alteracoesCredito.valor != null || alteracoesCredito.parcelas != null)) {
+        var novoValor = alteracoesCredito.valor != null
+          ? Number(alteracoesCredito.valor)
+          : Number(dadosCredito.valor || 0);
+        var novasParcelas = alteracoesCredito.parcelas != null
+          ? parseInt(alteracoesCredito.parcelas, 10)
+          : parseInt(dadosCredito.parcelas || 0, 10);
+        var reavaliacao = await avaliarElegibilidadeCredito(pedido.colaborador_id, {
+          valor: novoValor,
+          parcelas: novasParcelas,
+        });
+        if (!reavaliacao.elegivel) {
+          return res.status(400).json({
+            error: "Crédito não elegível com os dados alterados",
+            motivos: reavaliacao.motivos,
+            dados: reavaliacao,
+          });
+        }
+        dadosCredito = Object.assign({}, dadosCredito, {
+          valor: reavaliacao.valor_solicitado,
+          parcelas: reavaliacao.parcelas,
+          prestacao_mensal: reavaliacao.prestacao_mensal,
+          elegibilidade: reavaliacao,
+        });
+      }
+      if (novoEstado === "aprovado" && !dadosCredito.documento_assinado) {
+        return res.status(400).json({ error: "Anexe a ficha de crédito assinada antes de aprovar" });
+      }
+      // Copia mới: Sequelize so guarda o campo JSON quando a referencia muda.
+      dadosEstado.dados = Object.assign({}, dadosCredito);
+    }
+
     await pedido.update(dadosEstado);
+
+    if (novoEstado === "aprovado" && pedido.tipo === "credito") {
+      try {
+        var dadosCreditoAprovado = dadosDoPedido(pedido);
+        var elegibilidadeAprovada = dadosCreditoAprovado.elegibilidade ||
+          await avaliarElegibilidadeCredito(pedido.colaborador_id, {
+            valor: dadosCreditoAprovado.valor,
+            parcelas: dadosCreditoAprovado.parcelas,
+          });
+        var prestacaoAprovada = Number(dadosCreditoAprovado.prestacao_mensal || elegibilidadeAprovada.prestacao_mensal || 0);
+        var existeCredito = await Credito.findOne({
+          where: {
+            colaborador_id: pedido.colaborador_id,
+            valor: dadosCreditoAprovado.valor,
+            desconto_mensal: prestacaoAprovada,
+            motivo: "Crédito aprovado via pedido " + pedido.id,
+          },
+        });
+        if (!existeCredito) {
+          await Credito.create({
+            colaborador_id: pedido.colaborador_id,
+            valor: dadosCreditoAprovado.valor,
+            desconto_mensal: prestacaoAprovada,
+            valor_pago: 0,
+            data_concessao: new Date().toISOString().substring(0, 10),
+            motivo: "Crédito aprovado via pedido " + pedido.id,
+            estado: "Ativo",
+            criado_por: req.utilizador.id,
+          });
+        }
+      } catch (creditoErr) {
+        console.log("Erro ao criar crédito aprovado:", creditoErr.message);
+      }
+    }
 
     if (novoEstado === "aprovado" && pedido.tipo === "justificacao") {
       try {
@@ -359,6 +495,48 @@ var updateEstado = async function (req, res) {
   }
 };
 
+var anexarDocumentoAssinado = async function (req, res) {
+  try {
+    var pedido = await PedidoColaborador.findOne({
+      where: {
+        id: req.params.id,
+        organizacao_id: req.utilizador.organizacao_id,
+        tipo: "credito",
+      },
+    });
+    if (!pedido) {
+      return res.status(404).json({ error: "Pedido de crédito nao encontrado" });
+    }
+    if (["pendente", "processando"].indexOf(pedido.estado) === -1) {
+      return res.status(400).json({ error: "Este pedido já foi decidido" });
+    }
+    if (!req.files || !req.files.ficheiro) {
+      return res.status(400).json({ error: "Envie o ficheiro PDF assinado" });
+    }
+
+    var guardado = await guardarFicheiro({
+      file: req.files.ficheiro,
+      pasta: "pedidos",
+      organizacao_id: req.utilizador.organizacao_id,
+      carregado_por: req.utilizador.id,
+    });
+    var dados = dadosDoPedido(pedido);
+    var dadosAtualizados = Object.assign({}, dados, {
+      documento_assinado: urlDoFicheiro(guardado),
+      documento_assinado_em: new Date().toISOString(),
+    });
+    await pedido.update({ dados: dadosAtualizados });
+
+    return res.status(200).json({
+      mensagem: "Ficha de crédito assinada anexada com sucesso",
+      dados: pedido,
+    });
+  } catch (e) {
+    console.log("Erro ao anexar ficha de crédito assinada:", e.message);
+    return res.status(500).json({ error: "Erro ao anexar o documento assinado" });
+  }
+};
+
 var getStats = async function (req, res) {
   try {
     var baseWhere = {
@@ -429,6 +607,10 @@ var remove = async function (req, res) {
     if (pedido.documento) {
       await apagarFicheiroDeUrl(pedido.documento);
     }
+    var dadosRemocao = dadosDoPedido(pedido);
+    if (dadosRemocao.documento_assinado) {
+      await apagarFicheiroDeUrl(dadosRemocao.documento_assinado);
+    }
 
     await pedido.destroy();
 
@@ -439,4 +621,4 @@ var remove = async function (req, res) {
   }
 };
 
-module.exports = { list, getById, create, updateEstado, getStats, remove, downloadDocumento };
+module.exports = { list, getById, create, updateEstado, getStats, remove, downloadDocumento, anexarDocumentoAssinado };

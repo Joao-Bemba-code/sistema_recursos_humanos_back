@@ -132,12 +132,12 @@ var getById = async function (req, res) {
   }
 };
 
-// O numero de colaborador e unico em TODA a tabela (ver modelo Colaborador).
-// Gerar "COL-00001" por organizacao fazia a primeira pessoa de uma
-// organizacao nova colidir com a primeira da organizacao existente. Por isso
-// procuramos o maior numero usado em todas as organizacoes.
-var generateNumero = async function () {
+// Numeracao POR ORGANIZACAO: cada org comeca em COL-00001 e nao continua a
+// sequencia das outras. O UNICO agora e composto (organizacao_id, numero),
+// por isso numeros iguais em orgs diferentes sao legitimos.
+var generateNumero = async function (organizacaoId) {
   var usados = await Colaborador.findAll({
+    where: { organizacao_id: organizacaoId || ORG_INEXISTENTE },
     attributes: ["numero_colaborador"],
     raw: true,
   });
@@ -218,11 +218,12 @@ var create = async function (req, res) {
 
     var numeroFornecido = !!dados.numero_colaborador;
     if (!numeroFornecido) {
-      dados.numero_colaborador = await generateNumero();
+      dados.numero_colaborador = await generateNumero(req.organizacao_id);
     }
 
-    // A numeracao e global. Se dois pedidos chegarem ao mesmo tempo, o indice
-    // unico pode rejeitar o numero calculado; nesse caso tentamos o seguinte.
+    // A numeracao e por organizacao. Se dois pedidos da mesma org chegarem ao
+    // mesmo tempo, o indice unico composto pode rejeitar o numero calculado;
+    // nesse caso tentamos o seguinte.
     // Quando o numero veio do formulario/API, nao o substituimos: devolvemos o
     // conflito para o utilizador escolher outro.
     var colaborador = null;
@@ -239,7 +240,7 @@ var create = async function (req, res) {
         if (numeroFornecido || !eConflitoNumero || tentativa === 4) {
           throw eNumero;
         }
-        dados.numero_colaborador = await generateNumero();
+        dados.numero_colaborador = await generateNumero(req.organizacao_id);
       }
     }
 

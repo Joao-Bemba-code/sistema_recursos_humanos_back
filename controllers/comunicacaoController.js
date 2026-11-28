@@ -1,7 +1,9 @@
 var { Op } = require("sequelize");
-var { Aviso, ComunicacaoAnexo, Utilizador, Colaborador, Departamento, Cargo, Unidade, Seccao, UnidadeSeccao } = require("../models");
+var { Aviso, ComunicacaoAnexo, Utilizador, Colaborador, Departamento, Cargo, Unidade, Seccao, UnidadeSeccao, Notificacao } = require("../models");
 var { perfisUtilizador, fundirPermissoes, temPermissao } = require("../protect/rbac");
 var { vinculosDoColaborador } = require("../helpers/vinculos");
+var notificacaoController = require("./notificacaoController");
+var { obterIdsDestinatarios, linkDoComunicado } = require("../helpers/destinatariosComunicado");
 
 // Limites dos anexos (guardados na BD em base64): ate 8 ficheiros, cada um
 // ate ~10MB depois de codificado em base64.
@@ -95,6 +97,41 @@ var temImagemValida = function (anexos) {
 
 var temConteudo = function (conteudo) {
   return String(conteudo || "").trim().length > 0;
+};
+
+// Avisa as pessoas que podem ver o comunicado. O link inclui o id para que
+// cada comunicado gere uma unica notificacao por dispositivo/utilizador.
+var notificarComunicado = async function (aviso, req) {
+  try {
+    if (!aviso || !aviso.publicado) return;
+    var ids = await obterIdsDestinatarios(aviso, req.utilizador.organizacao_id);
+    if (!ids.length) return;
+
+    var link = linkDoComunicado(aviso.id);
+    var urgente = aviso.tipo === "Urgente";
+    var titulo = urgente ? "Comunicado urgente" : "Novo comunicado";
+    var mensagem = String(aviso.titulo || "Comunicado").slice(0, 120);
+    if (aviso.tipo && aviso.tipo !== "Geral") mensagem += " (" + aviso.tipo + ")";
+
+    for (var i = 0; i < ids.length; i++) {
+      if (ids[i] === req.utilizador.id) continue;
+      var jaExiste = await Notificacao.count({
+        where: { utilizador_id: ids[i], link: link },
+      });
+      if (jaExiste > 0) continue;
+      await notificacaoController.create({
+        organizacao_id: req.utilizador.organizacao_id,
+        utilizador_id: ids[i],
+        titulo: titulo,
+        mensagem: mensagem,
+        tipo: urgente ? "warning" : "info",
+        link: link,
+        modulo: "comunicados",
+      });
+    }
+  } catch (e) {
+    console.log("Aviso: nao foi possivel notificar o comunicado:", e.message);
+  }
 };
 
 var criarAnexos = async function (comunicadoId, anexos) {
@@ -380,6 +417,8 @@ var create = async function (req, res) {
 
     var criados = await criarAnexos(aviso.id, anexos);
 
+    await notificarComunicado(aviso, req);
+
     var resultado = await Aviso.findByPk(aviso.id, { include: incluirAnexos });
 
     return res.status(201).json({
@@ -405,6 +444,7 @@ var update = async function (req, res) {
       return res.status(404).json({ error: "Comunicado nao encontrado" });
     }
 
+    var eraPublicado = aviso.publicado;
     var camposProtegidos = ["id", "organizacao_id", "criado_por", "createdAt", "updatedAt", "anexos", "anexos_remover"];
     var dadosActualizar = {};
 
@@ -460,6 +500,8 @@ var update = async function (req, res) {
     // Adicionar novos anexos
     await criarAnexos(aviso.id, req.body.anexos);
 
+    if (!eraPublicado && aviso.publicado) await notificarComunicado(aviso, req);
+
     var resultado = await Aviso.findByPk(aviso.id, { include: incluirAnexos });
 
     return res.status(200).json({
@@ -507,7 +549,10 @@ var togglePublicado = async function (req, res) {
       return res.status(404).json({ error: "Comunicado nao encontrado" });
     }
 
-    await aviso.update({ publicado: !aviso.publicado });
+    var eraPublicado = aviso.publicado;
+    await aviso.update({ publicado: !eraPublicado });
+
+    if (!eraPublicado && aviso.publicado) await notificarComunicado(aviso, req);
 
     return res.status(200).json({
       mensagem: aviso.publicado ? "Comunicado publicado" : "Comunicado despublicado",

@@ -1,7 +1,8 @@
 var { Op, fn, col } = require("sequelize");
-var { PicagemBiometrico, Colaborador, RegistoPresenca, Feriado, EscalaSemanal } = require("../models");
+var { PicagemBiometrico, Colaborador, RegistoPresenca, Feriado, EscalaSemanal, Utilizador, Perfil, Notificacao } = require("../models");
 var { ORG_INEXISTENTE, incluirColaboradorDaOrg } = require("../helpers/organizacao");
 var { sincronizarPresenca, removerMovimentosDoRegisto } = require("../helpers/bancoHoras");
+var notificacaoController = require("./notificacaoController");
 
 // Horario de trabalho por omissao (configuravel por env): entrada 08:00, saida
 // 16:00. Serve de FALLBACK para colaboradores sem escala semanal propria (ver
@@ -173,6 +174,85 @@ var ehObservacaoAutomatica = function (texto) {
   if (!texto) return true;
   var s = String(texto);
   return s.indexOf("automático do biómetro") !== -1 || s.indexOf("Falta automática") !== -1;
+};
+
+// ==================== ALERTA NO SISTEMA (SINO) ====================
+// Quando o biometro classifica um dia como Atrasado, avisa o colaborador e a
+// equipa de RH da mesma organizacao pelo canal normal de notificacoes (o mesmo
+// das tarefas/formacoes). Um aviso por (colaborador, data) e por destinatario:
+// a reclassificacao pode correr varias vezes no mesmo dia e nao pode duplicar.
+var TITULO_ALERTA_ATRASO = "Atraso registado no biómetro";
+var LINK_ALERTA_ATRASO = "/dashboard/faltas";
+var PERFIS_RH_ALERTA = [
+  "Administrador Geral", "Director Geral", "Director de Recursos Humanos", "Técnico de RH",
+];
+
+var alertarAtraso = async function (registo, colab) {
+  try {
+    if (!registo || registo.estado !== "Atrasado") return;
+    var orgId = colab && colab.organizacao_id;
+    if (!orgId) return;
+
+    var data = dataLocal(registo.data);
+    var minutos = 0;
+    var encontrado = String(registo.observacoes || "").match(/Atraso de (\d+) min/);
+    if (encontrado) minutos = parseInt(encontrado[1], 10);
+
+    var nome = (colab.nome_completo || "Colaborador").trim();
+    var numero = colab.numero_colaborador ? String(colab.numero_colaborador) + " — " : "";
+    var mensagem = numero + nome + " ficou com atraso em " + data +
+      (minutos > 0 ? " (" + minutos + " min após a tolerância de " + TOLERANCIA_MINUTOS + " min)" : "") +
+      ". Ver faltas e atrasos.";
+
+    var destinatarios = [];
+    if (colab.utilizador_id) destinatarios.push(colab.utilizador_id);
+
+    var utilizadores = await Utilizador.findAll({
+      where: { organizacao_id: orgId },
+      attributes: ["id", "perfil_id", "super_admin"],
+      include: [
+        { model: Perfil, as: "perfil", attributes: ["nome"], required: false },
+        { model: Perfil, as: "perfis_extra", attributes: ["nome"], required: false, through: { attributes: [] } },
+      ],
+    });
+    utilizadores.forEach(function (u) {
+      var perfis = [];
+      if (u.perfil && u.perfil.nome) perfis.push(u.perfil.nome);
+      (u.perfis_extra || []).forEach(function (p) {
+        if (p && p.nome) perfis.push(p.nome);
+      });
+      if (perfis.some(function (p) { return PERFIS_RH_ALERTA.indexOf(p) !== -1; })) {
+        destinatarios.push(u.id);
+      }
+    });
+
+    var unicos = {};
+    for (var di = 0; di < destinatarios.length; di++) {
+      var uid = destinatarios[di];
+      if (!uid || unicos[uid]) continue;
+      unicos[uid] = true;
+      var jaExiste = await Notificacao.findOne({
+        where: {
+          organizacao_id: orgId,
+          utilizador_id: uid,
+          titulo: TITULO_ALERTA_ATRASO,
+          mensagem: mensagem,
+        },
+      });
+      if (jaExiste) continue;
+      await notificacaoController.create({
+        organizacao_id: orgId,
+        utilizador_id: uid,
+        titulo: TITULO_ALERTA_ATRASO,
+        mensagem: mensagem,
+        tipo: "warning",
+        link: LINK_ALERTA_ATRASO,
+        modulo: "faltas",
+      });
+    }
+  } catch (e) {
+    console.log("Aviso: alerta de atraso não criado:", e.message);
+  }
 };
 
 // Descobre a entrada e a saida de um dia a partir das picagens.
@@ -399,7 +479,7 @@ var sincronizar = async function (req, res) {
       var resultadoReclass = await reclassificarAutomaticos(janelaDesde);
       var colabsReclass = await Colaborador.findAll({
         where: { id_biometrico: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] } },
-        attributes: ["id", "nome_completo", "numero_colaborador", "id_biometrico", "estado", "data_admissao", "data_desligamento", "dias_descanso"],
+        attributes: ["id", "organizacao_id", "utilizador_id", "nome_completo", "numero_colaborador", "id_biometrico", "estado", "data_admissao", "data_desligamento", "dias_descanso"],
       });
       var mapaEscalasReclass = await carregarMapaEscalas(colabsReclass);
       var ausentesReclass = await marcarAusentesAutomaticos(colabsReclass, mapaEscalasReclass, janelaDesde);
@@ -421,7 +501,7 @@ var sincronizar = async function (req, res) {
     // 2) Mapear id_biometrico -> colaborador
     var colaboradores = await Colaborador.findAll({
       where: { id_biometrico: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] } },
-      attributes: ["id", "nome_completo", "numero_colaborador", "id_biometrico", "estado", "data_admissao", "data_desligamento", "dias_descanso"],
+      attributes: ["id", "organizacao_id", "utilizador_id", "nome_completo", "numero_colaborador", "id_biometrico", "estado", "data_admissao", "data_desligamento", "dias_descanso"],
     });
     var mapa = {};
     for (var j = 0; j < colaboradores.length; j++) {
@@ -520,6 +600,7 @@ var sincronizar = async function (req, res) {
         });
         try { await sincronizarPresenca(novoRegisto); } catch (bancoErr) { console.log("Aviso banco horas:", bancoErr.message); }
         registosCriados++;
+        await alertarAtraso(novoRegisto, grupo.colab);
       } else {
         // Registo corrigido a mao pelo RH (metodo Manual ou ajustado_manual): o
         // biometro nao lhe toca mais, para nao voltar a trocar o que o RH corrigiu
@@ -554,6 +635,7 @@ var sincronizar = async function (req, res) {
         });
         try { await sincronizarPresenca(existente); } catch (bancoErr) { console.log("Aviso banco horas:", bancoErr.message); }
         registosActualizados++;
+        await alertarAtraso(existente, grupo.colab);
       }
 
       await PicagemBiometrico.update({ processada: true, colaborador_id: grupo.colab.id }, { where: { id: { [Op.in]: grupo.ids } } });
@@ -747,7 +829,7 @@ var reclassificarAutomaticos = async function (desdeStr) {
 
   // Colaboradores mapeados no biometro (para escalas e criacao de registos)
   var cols = await Colaborador.findAll({
-    attributes: ["id", "dias_descanso", "id_biometrico", "estado", "data_admissao", "data_desligamento"],
+    attributes: ["id", "organizacao_id", "utilizador_id", "nome_completo", "numero_colaborador", "dias_descanso", "id_biometrico", "estado", "data_admissao", "data_desligamento"],
     where: { id_biometrico: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] } },
   });
   var colabById = {};
@@ -851,7 +933,7 @@ var reclassificarAutomaticos = async function (desdeStr) {
     if (!horariosNovos.entrada) continue;
 
     try {
-      await RegistoPresenca.create({
+      var registoNovo = await RegistoPresenca.create({
         colaborador_id: colabId,
         data: dataStr,
         hora_entrada: horariosNovos.entrada,
@@ -863,6 +945,7 @@ var reclassificarAutomaticos = async function (desdeStr) {
         observacoes: observacaoAutomatica(horariosNovos.entrada, !!horariosNovos.saida, dataStr, escala),
       });
       criados++;
+      await alertarAtraso(registoNovo, colab);
     } catch (e) {
       if (e.name !== "SequelizeUniqueConstraintError") {
         console.log("Erro ao criar registo em falta na reclassificacao:", e.message);
@@ -933,6 +1016,7 @@ var reclassificarAutomaticos = async function (desdeStr) {
     });
     try { await sincronizarPresenca(registo); } catch (bancoErr) { console.log("Aviso banco horas:", bancoErr.message); }
     actualizados++;
+    await alertarAtraso(registo, colabReg);
   }
 
   // 3) Limpar "Ausente" automaticos que ja nao deviam existir: dias que passaram
@@ -1030,4 +1114,16 @@ var picagens = async function (req, res) {
   }
 };
 
-module.exports = { sincronizar, mapeamento, picagens, reclassificarAutomaticos, escalaFallback };
+module.exports = {
+  sincronizar,
+  mapeamento,
+  picagens,
+  reclassificarAutomaticos,
+  escalaFallback,
+  // Funcoes puras exportadas para testar a regra da tolerancia de 15 minutos
+  // e o prolongamento da saida esperada sem precisar de base de dados.
+  paraMinutos,
+  classificarEstado,
+  observacaoAutomatica,
+  TOLERANCIA_MINUTOS,
+};

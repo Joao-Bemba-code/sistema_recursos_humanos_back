@@ -295,6 +295,14 @@ var migrations = async function () {
       console.log(" Aviso: indice unidade_negocio ja existe ou nao pôde ser criado:", e.message);
     });
 
+    // Numeracao de colaboradores e POR ORGANIZACAO. Antes havia um UNICO
+    // global, o que obrigava a sequencia COL-xxxxx a continuar de org para
+    // org. Retiramos esse UNICO e garantimos um composto por organizacao.
+    await sequelize.query("ALTER TABLE `colaboradores` DROP INDEX `numero_colaborador`").catch(function () { /* ja removido */ });
+    await sequelize.query("ALTER TABLE `colaboradores` DROP INDEX `colaboradores_numero_colaborador`").catch(function () { /* ja removido */ });
+    // O sync no inicio desta migracao ja cria o UNICO composto definido no
+    // modelo Colaborador: (organizacao_id, numero_colaborador).
+
     // ==================== FERIADOS ====================
     await sequelize.query(
       "CREATE TABLE IF NOT EXISTS `feriados` (" +
@@ -1309,6 +1317,18 @@ var migrations = async function () {
       }
     } catch (ePermDownload) {
       console.log(" Aviso: nao foi possivel conceder permissao de download:", ePermDownload.message);
+    }
+
+    // ==================== PEDIDOS: tipo CREDITO ====================
+    // Apenas acrescenta um valor ao ENUM existente; nao recria tabelas.
+    try {
+      await sequelize.query(
+        "ALTER TABLE `pedidos_colaborador` MODIFY COLUMN `tipo` " +
+        "ENUM('ferias','adiantamento','justificacao','aumento','dispensa','licenca','credito','outro') NOT NULL"
+      );
+      console.log(" Coluna 'tipo' de pedidos_colaborador actualizada com 'credito'!");
+    } catch (eCredito) {
+      console.log(" Aviso: nao foi possivel actualizar ENUM de pedidos:", eCredito.message);
     }
 
     console.log(" Migracoes concluidas com sucesso!");

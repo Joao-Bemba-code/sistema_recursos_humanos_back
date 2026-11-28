@@ -1,6 +1,7 @@
 var { Colaborador, Ferias, SolicitacaoFerias, AvaliacaoDesempenho, CicloAvaliacao, PedidoColaborador, RegistoPresenca, Contrato, Pagamento, Tarefa, TarefaAlocacao } = require("../models");
 var { Op, Sequelize } = require("sequelize");
 var { calcularSaldo, calcularDesconto } = require("../helpers/bancoHoras");
+var { avaliarElegibilidadeCredito } = require("../helpers/elegibilidadeCredito");
 
 var formatarDataLocal = function (d) {
   var ano = d.getFullYear();
@@ -428,4 +429,23 @@ var getRegistosPresenca = async function (req, res) {
   }
 };
 
-module.exports = { getPortalStats, getRegistosPresenca };
+var getElegibilidadeCredito = async function (req, res) {
+  try {
+    var colaborador = await Colaborador.findOne({
+      where: { utilizador_id: req.utilizador.id, organizacao_id: req.utilizador.organizacao_id },
+    });
+    if (!colaborador) {
+      return res.status(404).json({ error: "Colaborador nao encontrado para o utilizador actual" });
+    }
+    var elegibilidade = await avaliarElegibilidadeCredito(colaborador.id, {
+      valor: req.query.valor,
+      parcelas: req.query.parcelas,
+    });
+    return res.status(200).json({ dados: elegibilidade });
+  } catch (e) {
+    console.log("Erro ao avaliar elegibilidade de credito:", e.message);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+module.exports = { getPortalStats, getRegistosPresenca, getElegibilidadeCredito };

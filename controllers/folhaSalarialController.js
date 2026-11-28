@@ -54,6 +54,17 @@ var paraMinutos = function (hora) {
   return h * 60 + m;
 };
 
+// "HH:MM:SS" -> segundos desde a meia-noite (os segundos tambem contam).
+var paraSegundos = function (hora) {
+  if (!hora) return null;
+  var partes = String(hora).split(":");
+  var h = parseInt(partes[0], 10);
+  var m = parseInt(partes[1], 10);
+  var s = parseInt(partes[2], 10);
+  if (isNaN(h) || isNaN(m)) return null;
+  return h * 3600 + m * 60 + (isNaN(s) ? 0 : s);
+};
+
 var calcularSegurancaSocial = function (bruto) {
   return arredondar(bruto * TAXA_SEGURANCA_SOCIAL);
 };
@@ -188,16 +199,21 @@ var formatarDataLocal = function (d) {
 // do processamento (sem limite de data). Se pagamentoId for passado
 // (actualizacao/recalculo), as faltas ja processadas por ESSE pagamento
 // tambem contam.
-// Devolve { total, horas_falta, minutos_atraso, valor_hora, valor_minuto,
-//           valor_segundo, valor_milissegundo }:
+// Devolve { total, horas_falta, minutos_atraso, segundos_atraso, valor_hora,
+//           valor_minuto, valor_segundo, valor_milissegundo }:
 //   - "Ausente"  -> desconta 8 horas por dia
-//   - "Atrasado" -> desconta os minutos depois do limite de entrada
-//                   (08:15 por omissao), minuto a minuto, pelo valor da hora
+//   - "Atrasado" -> tempo depois do limite de entrada (08:15 por omissao) e
+//                   minutado/segundado para consulta, mas AINDA NAO e
+//                   descontado na folha (so as faltas entram no total).
+// O salario diario e salario_base/30 e o valor da hora e diario/8 (jornada
+// de 8 horas). A partir daqui derivam o valor do minuto, do segundo e do
+// milissegundo, para uso quando o desconto de atrasos for activado.
 var calcularDescontoFaltas = async function (colaborador_id, mes, ano, pagamentoId, apenasMes) {
   var resultado = {
     total: 0,
     horas_falta: 0,
     minutos_atraso: 0,
+    segundos_atraso: 0,
     valor_hora: 0,
     valor_minuto: 0,
     valor_segundo: 0,
@@ -256,24 +272,28 @@ var calcularDescontoFaltas = async function (colaborador_id, mes, ano, pagamento
     resultado.valor_segundo = Math.round(valorSegundo * 10000) / 10000;
     resultado.valor_milissegundo = Math.round(valorMilissegundo * 1000000) / 1000000;
 
-    var limiteEntrada = paraMinutos(HORARIO_ENTRADA_PADRAO) + TOLERANCIA_ATRASO_MINUTOS;
+    var limiteEntradaSegundos = (paraMinutos(HORARIO_ENTRADA_PADRAO) + TOLERANCIA_ATRASO_MINUTOS) * 60;
     var horasDescontar = 0;
-    var minutosAtraso = 0;
+    var segundosAtraso = 0;
 
     faltas.forEach(function (f) {
       if (f.estado === "Ausente") {
         horasDescontar += 8;
       } else if (f.estado === "Atrasado") {
-        var minutosEntrada = paraMinutos(f.hora_entrada);
-        if (minutosEntrada !== null && minutosEntrada > limiteEntrada) {
-          minutosAtraso += minutosEntrada - limiteEntrada;
+        var segundosEntrada = paraSegundos(f.hora_entrada);
+        if (segundosEntrada !== null && segundosEntrada > limiteEntradaSegundos) {
+          segundosAtraso += segundosEntrada - limiteEntradaSegundos;
         }
       }
     });
 
     resultado.horas_falta = horasDescontar;
-    resultado.minutos_atraso = minutosAtraso;
-    resultado.total = arredondar(horasDescontar * valorHora + minutosAtraso * valorMinuto);
+    resultado.segundos_atraso = segundosAtraso;
+    resultado.minutos_atraso = Math.round((segundosAtraso / 60) * 100) / 100;
+    // Por enquanto so as FALTAS sao descontadas. Os atrasos continuam a ser
+    // contados/minutados (campos acima) para consulta, mas nao entram no valor
+    // descontado na folha até nova instrucao.
+    resultado.total = arredondar(horasDescontar * valorHora);
     return resultado;
   } catch (e) {
     console.log("Erro ao calcular desconto de faltas:", e.message);

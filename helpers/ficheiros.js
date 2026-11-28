@@ -51,7 +51,11 @@ var REFERENCIAS = [
 ];
 
 function cloudinaryConfigurado() {
-  return !!process.env.CLOUDINARY_CLOUD_NAME && !!process.env.CLOUDINARY_API_KEY && !!process.env.CLOUDINARY_API_SECRET;
+  var valores = [process.env.CLOUDINARY_CLOUD_NAME, process.env.CLOUDINARY_API_KEY, process.env.CLOUDINARY_API_SECRET];
+  // O .env de desenvolvimento traz valores de exemplo. Nao os considerar
+  // configurados evita falhas de upload e permite o fallback local.
+  var placeholder = /^YOUR_/i;
+  return valores.every(function (v) { return !!v && !placeholder.test(String(v)); });
 }
 
 function sanitizarPasta(pasta) {

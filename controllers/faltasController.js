@@ -5,6 +5,23 @@ var { guardarFicheiro, urlDoFicheiro, apagarFicheiroDeUrl, responderComFicheiro 
 // Uma falta fica "processada" (flag processada) quando a folha do mes que a
 // descontou e processada. Nao e preciso inferir a partir dos pagamentos.
 
+// Mesma regra do biometro e da folha salarial: tolerancia de 15 minutos
+// (entrada ate as 08:15 nao desconta; depois disso desconta-se ao minuto).
+var TOLERANCIA_MINUTOS = parseInt(process.env.TOLERANCIA_ENTRADA || "15", 10);
+if (isNaN(TOLERANCIA_MINUTOS) || TOLERANCIA_MINUTOS < 0) TOLERANCIA_MINUTOS = 15;
+var partesHorario = String((process.env.HORARIO_ENTRADA || "08:00").slice(0, 5)).split(":");
+var LIMITE_ENTRADA_MINUTOS = (parseInt(partesHorario[0], 10) || 0) * 60 +
+  (parseInt(partesHorario[1], 10) || 0) + TOLERANCIA_MINUTOS;
+
+var minutosDaHora = function (hora) {
+  if (!hora) return null;
+  var partes = String(hora).split(":");
+  var h = parseInt(partes[0], 10);
+  var m = parseInt(partes[1], 10);
+  if (isNaN(h) || isNaN(m)) return null;
+  return h * 60 + m;
+};
+
 var resumo = async function (req, res) {
   try {
     var org_id = req.utilizador.organizacao_id;
@@ -102,13 +119,9 @@ var resumo = async function (req, res) {
       var jaProcessada = a.processada || false;
       resumoColab[cid].total_atrasos++;
       var mins = 0;
-      if (a.hora_entrada) {
-        var partes = a.hora_entrada.split(":");
-        var minsEntrada = parseInt(partes[0]) * 60 + parseInt(partes[1]);
-        var minsNormais = 8 * 60;
-        if (minsEntrada > minsNormais) {
-          mins = minsEntrada - minsNormais;
-        }
+      var minsEntrada = minutosDaHora(a.hora_entrada);
+      if (minsEntrada !== null && minsEntrada > LIMITE_ENTRADA_MINUTOS) {
+        mins = minsEntrada - LIMITE_ENTRADA_MINUTOS;
       }
       resumoColab[cid].minutos_atraso_total += mins;
       var justificado = a.justificado || false;
@@ -117,6 +130,8 @@ var resumo = async function (req, res) {
       } else if (jaProcessada) {
         resumoColab[cid].total_atrasos_processados++;
       } else {
+        // Os atrasos ficam so contabilizados; o desconto financeiro ainda nao
+        // esta activo (so as faltas sao descontadas).
         resumoColab[cid].total_atrasos_pendentes++;
       }
       resumoColab[cid].atrasos_detalhe.push({
@@ -152,7 +167,10 @@ var resumo = async function (req, res) {
         var salarioDiario = parseFloat(v.salario_base) / 30;
         var salarioHora = salarioDiario / 8;
         resumoColab[cid].salario_hora = salarioHora;
-        resumoColab[cid].desconto_previsto = Math.round(resumoColab[cid].horas_descontar_efectivo * salarioHora * 100) / 100;
+        // So as faltas sao descontadas por enquanto (8h por dia, salario/30/8).
+        resumoColab[cid].desconto_previsto = Math.round(
+          resumoColab[cid].horas_descontar_efectivo * salarioHora * 100
+        ) / 100;
       });
     }
 

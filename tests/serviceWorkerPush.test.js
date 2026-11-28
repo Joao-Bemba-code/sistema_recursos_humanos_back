@@ -21,7 +21,7 @@ function carregarServiceWorker() {
     addEventListener: function (nome, handler) { eventos[nome] = handler; },
   };
 
-  var ficheiro = path.resolve(__dirname, "../../sistema_recurso_humanos/public/sw.js");
+  var ficheiro = path.resolve(__dirname, "../../sistema_recursos_humanos_front/public/sw.js");
   vm.runInNewContext(fs.readFileSync(ficheiro, "utf8"), {
     self: selfFalso,
     URL: URL,

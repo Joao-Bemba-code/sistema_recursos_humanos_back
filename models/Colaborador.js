@@ -7,10 +7,12 @@ var Colaborador = sequelize.define("Colaborador", {
     defaultValue: DataTypes.UUIDV4,
     primaryKey: true,
   },
+  // A numeracao e por organizacao: COL-00001 pode existir em varias orgs.
+  // O UNICO composto (organizacao_id + numero_colaborador) esta nos indexes
+  // abaixo; nao pode haver UNICO global nesta coluna.
   numero_colaborador: {
     type: DataTypes.STRING(20),
     allowNull: false,
-    unique: true,
   },
   id_biometrico: {
     type: DataTypes.STRING(30),
@@ -170,7 +172,8 @@ var Colaborador = sequelize.define("Colaborador", {
   tableName: "colaboradores",
   timestamps: true,
   indexes: [
-    { fields: ["numero_colaborador"], unique: true },
+    { fields: ["numero_colaborador"] },
+    { fields: ["organizacao_id", "numero_colaborador"], unique: true },
     { fields: ["estado"] },
     { fields: ["tipo_colaborador"] },
     { fields: ["nome_completo"] },

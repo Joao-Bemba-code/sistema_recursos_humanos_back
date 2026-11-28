@@ -1,11 +1,9 @@
-// O campo numero_colaborador tem um indice UNICO global na tabela
-// (nao e unico por organizacao). Por isso a numeracao nao pode reiniciar em
-// COL-00001 para cada organizacao: a primeira pessoa de uma organizacao nova
-// entraria em colisao com a primeira pessoa da organizacao ja existente e o
-// CREATE falharia com "Numero de colaborador ja existe".
+// Numeracao de colaboradores e POR ORGANIZACAO: cada org comeca em COL-00001.
+// O controle de duplicados e feito pelo indice UNICO composto
+// (organizacao_id, numero_colaborador) na tabela.
 //
-// Funcao pura para facilitar testes: recebe todos os numeros ja usados e
-// devolve o proximo numero livre, ignorando formatos antigos/irregulares.
+// Funcao pura para facilitar testes: recebe os numeros ja usados DENTRO DA
+// MESMA ORGANIZACAO e devolve o proximo, ignorando formatos irregulares.
 
 var proximoNumeroColaborador = function (numeros) {
   var maior = 0;
